@@ -1,0 +1,8 @@
+
+[workspace]
+members = [ "proto", "daemon", "ctl" ]
+
+[patch.crates-io]
+gpsrs-proto = { path = "./proto"}
+gpsrs-daemon = { path = "./daemon"}
+gpsrs-ctl = { path = "./ctl" }
