@@ -4,6 +4,10 @@ use tracing::{error, span, trace, Instrument, Level};
 
 use gpsrs_proto::{Req, Resp};
 
+pub mod ntrip;
+pub mod gps;
+pub mod unix;
+
 #[derive(Clone, PartialEq, Debug, Parser)]
 pub struct Options {
     /// Daemon control socket
