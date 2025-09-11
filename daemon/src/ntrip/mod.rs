@@ -1,4 +1,3 @@
-use actix::Actor;
 use isocountry::CountryCode;
 
 mod linz;
@@ -7,16 +6,6 @@ pub struct RtcmActor {
 
 }
 
-impl Actor for RtcmActor {
-    type Context = actix::Context<Self>;
-    
-    fn start(self) -> actix::Addr<Self>
-    where
-        Self: Actor<Context = actix::Context<Self>>,
-    {
-        actix::Context::new().run(self)
-    }
-}
 
 impl RtcmActor {
     pub async fn connect(provider: RtcmProvider, creds: RtcmCredentials, mount: impl ToString) -> Result<Self, anyhow::Error> {
