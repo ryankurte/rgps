@@ -1,5 +1,3 @@
-
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LinzLocationId {
     /// Kaitia
@@ -124,12 +122,12 @@ impl AsRef<str> for LinzLocationId {
 
 impl LinzLocationId {
     /// Fetch the lat / long location for a Linz location
-    /// (this seems to need to be manually copied from 
+    /// (this seems to need to be manually copied from
     /// https://www.geodesy.linz.govt.nz/positionzrt/)
     pub fn location(&self) -> (f32, f32) {
         match self {
             Self::AUCK => (-36.60, 174.83),
-            _ => unimplemented!()
+            _ => unimplemented!(),
         }
     }
 }

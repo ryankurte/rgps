@@ -1,42 +1,42 @@
+use clap::Parser;
 use isocountry::CountryCode;
+use strum::{Display, EnumString, VariantNames};
+
+mod client;
+pub use client::RtcmClient;
 
 mod linz;
+pub(crate) mod parser;
 
-pub struct RtcmActor {
+/// Credentials for an NTRIP (RTCM) service
+#[derive(Clone, PartialEq, Debug, Parser)]
+pub struct NtripConfig {
+    #[clap(long = "ntrip-user", env = "NTRIP_USER")]
+    user: String,
 
+    #[clap(long = "ntrip-pass", env = "NTRIP_PASS", default_value = "")]
+    pass: String,
+
+    #[clap(
+        long = "ntrip-host",
+        env = "NTRIP_HOST",
+        default_value = "positionz-rt.linz.govt.nz"
+    )]
+    host: String,
+
+    #[clap(long = "ntrip-port", env = "NTRIP_PORT", default_value_t = 2101)]
+    port: u16,
 }
 
-
-impl RtcmActor {
-    pub async fn connect(provider: RtcmProvider, creds: RtcmCredentials, mount: impl ToString) -> Result<Self, anyhow::Error> {
-
-        let url = format!("ntrip://{}:{}@{}/{}", creds.username, creds.password, provider.url(), mount.to_string());
-
-        let raw_client = robust_ntrip_client::RobustNtripClient::new(
-            &url,
-            Default::default()
-        ).await
-        .map_err(|e| anyhow::anyhow!("Failed to create NTRIP client: {}", e))?;
-        let mut ntrip = robust_ntrip_client::ParsingNtripClient::new(raw_client);
-
-        Ok(RtcmActor {
-
-        })
+impl Default for NtripConfig {
+    fn default() -> Self {
+        NtripConfig {
+            user: "".to_string(),
+            pass: "".to_string(),
+            host: "positionz-rt.linz.govt.nz".to_string(),
+            port: 2101,
+        }
     }
-}
-
-pub enum RtcmProvider {
-    Linz,
-    Rtk2Go,
-    Other{
-        host: String,
-        port: u16,
-    }
-}
-
-pub struct RtcmCredentials {
-    username: String,
-    password: String,
 }
 
 pub struct RtcmMount {
@@ -50,21 +50,18 @@ impl ToString for RtcmMount {
     }
 }
 
-impl RtcmCredentials {
-    pub fn new(username: &str, password: &str) -> Self {
-        RtcmCredentials {
-            username: username.to_string(),
-            password: password.to_string(),
-        }
-    }
+/// RTCM NTRIP Provider
+#[derive(Clone, PartialEq, Debug, Parser, EnumString, Display, VariantNames)]
+pub enum RtcmProvider {
+    Linz,
+    Rtk2Go,
 }
 
 impl RtcmProvider {
     pub fn url(&self) -> &str {
         match self {
-            RtcmProvider::Linz => "caster.centipede.fr",
+            RtcmProvider::Linz => "positionz-rt.linz.govt.nz",
             RtcmProvider::Rtk2Go => "rtk2go.com",
-            RtcmProvider::Other{ host, .. } => host,
         }
     }
 
@@ -72,7 +69,6 @@ impl RtcmProvider {
         match self {
             RtcmProvider::Linz => 2101,
             RtcmProvider::Rtk2Go => 2101,
-            RtcmProvider::Other{ port, .. } => *port,
         }
     }
 }

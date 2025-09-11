@@ -1,5 +1,1 @@
-
-
-pub struct GpsActor {
-
-}
+pub struct GpsActor {}

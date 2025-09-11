@@ -1,11 +1,13 @@
 use clap::Parser;
-use tokio::{io::AsyncReadExt, net::UnixListener, sync::broadcast::Sender as BroadcastSender, task};
-use tracing::{error, span, trace, Instrument, Level};
+use tokio::{
+    io::AsyncReadExt, net::UnixListener, sync::broadcast::Sender as BroadcastSender, task,
+};
+use tracing::{Level, error, span, trace};
 
 use gpsrs_proto::{Req, Resp};
 
-pub mod ntrip;
 pub mod gps;
+pub mod ntrip;
 pub mod unix;
 
 #[derive(Clone, PartialEq, Debug, Parser)]
@@ -31,93 +33,86 @@ impl Gpsd {
         let ctl_listener = UnixListener::bind(&opts.ctl_sock)?;
         let (rx_sink, rx_stream) = tokio::sync::mpsc::channel::<Req>(0);
 
-    
-
-
         // Create listening task
         let exit = exit.clone();
-        let ctl_task_handle = task::spawn(
-            async move {
-                let mut index = 0u32;
-                let mut e = exit.subscribe();
+        let ctl_task_handle = task::spawn(async move {
+            let mut index = 0u32;
+            let mut e = exit.subscribe();
 
-                loop {
-                    tokio::select! {
-                        c = ctl_listener.accept() => {
-                            match c {
-                                Ok((mut stream, addr)) => {
-                                    println!("new client {addr:?}!");
+            loop {
+                tokio::select! {
+                    c = ctl_listener.accept() => {
+                        match c {
+                            Ok((mut stream, addr)) => {
+                                println!("new client {addr:?}!");
 
-                                    // Spawn a handler task for this stream
-                                    let exit = exit.clone();
-                                    let rx_sink = rx_sink.clone();
-                                    task::spawn(async move {
-                                        let (mut unix_rx, unix_tx) = stream.split();
-                                        let (mut tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Resp>();
-                                        let mut e = exit.subscribe();
-                                        let mut rx_buff = [0u8; 1024];
+                                // Spawn a handler task for this stream
+                                let exit = exit.clone();
+                                let rx_sink = rx_sink.clone();
+                                task::spawn(async move {
+                                    let (mut unix_rx, unix_tx) = stream.split();
+                                    let (mut tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Resp>();
+                                    let mut e = exit.subscribe();
+                                    let mut rx_buff = [0u8; 1024];
 
-                                        loop {
-                                            tokio::select! {
-                                                // Handle incoming requests from the client
-                                                req = unix_rx.read(&mut rx_buff) => match req {
-                                                    Ok(n) => {
-                                                        // Process the request
-                                                        let s = std::str::from_utf8(&rx_buff[..n]).unwrap();
-                                                        println!("Received request: {s}");
-                                                        let r = serde_json::from_str::<Req>(s).unwrap();
+                                    loop {
+                                        tokio::select! {
+                                            // Handle incoming requests from the client
+                                            req = unix_rx.read(&mut rx_buff) => match req {
+                                                Ok(n) => {
+                                                    // Process the request
+                                                    let s = std::str::from_utf8(&rx_buff[..n]).unwrap();
+                                                    println!("Received request: {s}");
+                                                    let r = serde_json::from_str::<Req>(s).unwrap();
 
-                                                        // Forward to request handling
-                                                        rx_sink.send(r).await.unwrap();
+                                                    // Forward to request handling
+                                                    rx_sink.send(r).await.unwrap();
 
-                                                    }
-                                                    Err(e) => {
-                                                        // Channel closed
-                                                        break;
-                                                    }
-                                                },
-                                                // Handle outgoing responses for this client
-                                                resp = rx.recv() => match resp {
-                                                    Some(resp) => {
-                                                        // Send the response
-                                                    }
-                                                    None => {
-                                                        // Channel closed
-                                                        break;
-                                                    }
-                                                },
-
-                                                // Handle exit signal
-                                                _ = e.recv() => {
-                                                    println!("Received exit signal");
+                                                }
+                                                Err(e) => {
+                                                    // Channel closed
                                                     break;
                                                 }
+                                            },
+                                            // Handle outgoing responses for this client
+                                            resp = rx.recv() => match resp {
+                                                Some(resp) => {
+                                                    // Send the response
+                                                }
+                                                None => {
+                                                    // Channel closed
+                                                    break;
+                                                }
+                                            },
+
+                                            // Handle exit signal
+                                            _ = e.recv() => {
+                                                println!("Received exit signal");
+                                                break;
                                             }
                                         }
-                                    });
+                                    }
+                                });
 
 
-                                    index += 1;
-                                }
-                                Err(e) => { 
-                                    error!("Failed to accept connection: {e:?}");
-                                }
+                                index += 1;
                             }
-                        },
-
-                        _ = e.recv() => {
-                            println!("Received exit signal");
-                            break;
+                            Err(e) => {
+                                error!("Failed to accept connection: {e:?}");
+                            }
                         }
+                    },
+
+                    _ = e.recv() => {
+                        println!("Received exit signal");
+                        break;
                     }
                 }
-
-                Ok(())
             }
-        );
 
-        Ok(Self {
-            ctl_task_handle,
-        })
+            Ok(())
+        });
+
+        Ok(Self { ctl_task_handle })
     }
 }

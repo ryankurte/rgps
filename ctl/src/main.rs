@@ -1,12 +1,10 @@
-
 use clap::Parser;
 use tracing::{debug, level_filters::LevelFilter};
-use tracing_subscriber::{fmt::Subscriber as FmtSubscriber, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt::Subscriber as FmtSubscriber};
 
 /// WASM Embedded Runtime CLI
 #[derive(Clone, PartialEq, Debug, Parser)]
 struct Args {
-
     #[clap(long, default_value = "debug")]
     /// Set log level
     pub log_level: LevelFilter,
@@ -27,7 +25,6 @@ async fn main() -> Result<(), anyhow::Error> {
         .try_init();
 
     debug!("CTL args: {args:?}");
-
 
     Ok(())
 }
