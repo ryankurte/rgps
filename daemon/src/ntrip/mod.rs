@@ -72,3 +72,42 @@ impl RtcmProvider {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use hyper::{Method, Request, Uri};
+    use hyper_util::rt::TokioExecutor;
+    use tracing::{debug, info, level_filters::LevelFilter};
+    use tracing_subscriber::FmtSubscriber;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_ntrip_rtk2go() {
+        let _ = FmtSubscriber::builder()
+            .compact()
+            .without_time()
+            .with_max_level(LevelFilter::TRACE)
+            .try_init();
+
+        let client = reqwest::Client::builder()
+            .http1_ignore_invalid_headers_in_responses(true)
+            .http09_responses()
+            .user_agent(format!("NTRIP {}/{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION")))
+            .build()
+            .unwrap();
+
+        let req = client.request(Method::GET, "http://rtk2go.com:2101")
+            .header("Ntrip-Version", "Ntrip/2.0")
+            .build().unwrap();
+
+        let res = client.execute(req).await.expect("Fetch failed");
+
+        info!("Fetched NTRIP response: {:?}", res.status());
+
+        assert!(res.status().is_success());
+
+        debug!("Response: {:?}", res.text().await.unwrap());
+
+    }
+}

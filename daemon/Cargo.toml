@@ -25,6 +25,9 @@ robust-ntrip-client = "0.1.0"
 isocountry = "*"
 rust_iso3166 = "0.1.14"
 bytes = "*"
+reqwest = { version = "*" }
+hyper = { version = "*", features = [ "full" ] }
+hyper-util = { version = "*", features = [ "full" ] }
 
 [[bin]]
 name = "gpsd"
