@@ -1,21 +1,18 @@
-
 use clap::Parser;
 use tracing::{debug, info, level_filters::LevelFilter};
-use tracing_subscriber::{fmt::Subscriber as FmtSubscriber, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt::Subscriber as FmtSubscriber};
 
 /// GPSD(RS) Control Utility
 #[derive(Clone, PartialEq, Debug, Parser)]
 struct Args {
-
     #[clap(long, default_value = "debug")]
     /// Set log level
     pub log_level: LevelFilter,
 }
 
-
 #[tokio::main]
 async fn main() {
-        // Parse command line arguments
+    // Parse command line arguments
     let args = Args::parse();
 
     // Setup logging
@@ -45,6 +42,4 @@ async fn main() {
 
     // Await exit signal
     let _ = exit_rx.recv().await;
-
-
 }

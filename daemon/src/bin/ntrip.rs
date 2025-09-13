@@ -15,7 +15,7 @@ struct Args {
     #[clap(subcommand)]
     pub command: Commands,
 
-    #[clap(long, default_value = "trace")]
+    #[clap(long, default_value = "debug")]
     /// Set log level
     pub log_level: LevelFilter,
 }
@@ -108,9 +108,7 @@ async fn main() -> Result<(), anyhow::Error> {
             debug!("Connecting to NTRIP server");
 
             // Setup the NTRIP client
-            let mut client = RtcmClient::mount(args.ntrip_cfg, mount, exit_tx.clone())
-                .await
-                .unwrap();
+            let mut client = RtcmClient::mount(args.ntrip_cfg, mount, exit_tx.clone()).await?;
 
             // Process incoming RTCM messages
             loop {

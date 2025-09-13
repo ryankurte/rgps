@@ -8,12 +8,8 @@ use tracing::debug;
 mod client;
 pub use client::RtcmClient;
 
-mod linz;
-
 mod snip;
-pub use snip::{Constellation, Network, Protocol, MountInfo, ServerInfo};
-
-pub(crate) mod parser;
+pub use snip::{Constellation, MountInfo, Network, Protocol, ServerInfo};
 
 /// Credentials for an NTRIP (RTCM) service
 #[derive(Clone, PartialEq, Debug, Parser)]
@@ -36,7 +32,7 @@ impl Default for NtripConfig {
         NtripConfig {
             user: "".to_string(),
             pass: "".to_string(),
-            host: "positionz-rt.linz.govt.nz".to_string(),
+            host: "rtk2go.com".to_string(),
             port: 2101,
         }
     }
