@@ -11,7 +11,7 @@ pub use client::RtcmClient;
 mod linz;
 
 mod snip;
-pub use snip::{Constellation, Network, Protocol, ServerInfo, SnipInfo};
+pub use snip::{Constellation, Network, Protocol, MountInfo, ServerInfo};
 
 pub(crate) mod parser;
 

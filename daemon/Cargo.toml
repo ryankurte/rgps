@@ -28,6 +28,8 @@ bytes = "*"
 reqwest = { version = "*" }
 hyper = { version = "*", features = [ "full" ] }
 hyper-util = { version = "*", features = [ "full" ] }
+serialport5 = "5.0.2"
+http = "*"
 
 [[bin]]
 name = "gpsd"

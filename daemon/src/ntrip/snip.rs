@@ -6,19 +6,21 @@ use serde::{Deserialize, Serialize};
 use strum::{Display, EnumString, VariantNames};
 use tracing::debug;
 
+/// Information about an NTRIP / SNIP server and its mounts
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
-pub struct SnipInfo {
+pub struct ServerInfo {
     pub server: Option<String>,
     // TODO: parse this out?
     pub date: Option<String>,
     pub content_type: Option<String>,
     pub content_length: Option<usize>,
 
-    pub services: Vec<ServerInfo>,
+    pub services: Vec<MountInfo>,
 }
 
+/// Information about a specific NTRIP mount point
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
-pub struct ServerInfo {
+pub struct MountInfo {
     pub name: String,
     pub details: String,
     pub protocol: Protocol,
@@ -69,7 +71,7 @@ pub enum Constellation {
     Unknown,
 }
 
-impl SnipInfo {
+impl ServerInfo {
     pub fn parse<'a>(lines: impl Iterator<Item = &'a str>) -> Self {
         let mut server = None;
         let mut date = None;
@@ -88,7 +90,7 @@ impl SnipInfo {
                 content_length =
                     Some(line.trim_start_matches("Content-Length: ").parse().ok()).flatten();
             } else if line.starts_with("STR;") {
-                match ServerInfo::parse(line) {
+                match MountInfo::parse(line) {
                     Some(info) => {
                         services.push(info);
                     }
@@ -99,7 +101,7 @@ impl SnipInfo {
             }
         }
 
-        SnipInfo {
+        ServerInfo {
             server,
             date,
             content_type,
@@ -108,7 +110,7 @@ impl SnipInfo {
         }
     }
 
-    pub fn find_nearest(&self, location: &Location) -> Option<(&ServerInfo, f64)> {
+    pub fn find_nearest(&self, location: &Location) -> Option<(&MountInfo, f64)> {
         // If they're more than 100km away, we don't want to know
         let mut min_distance = 100_000f64;
         let mut min_entry = None;
@@ -127,7 +129,7 @@ impl SnipInfo {
     }
 }
 
-impl ServerInfo {
+impl MountInfo {
     pub fn parse(info: &str) -> Option<Self> {
         let parts: Vec<&str> = info.split(';').collect();
         if parts.len() < 2 {
@@ -187,7 +189,7 @@ impl ServerInfo {
 
         // TODO: the rest of the fields
 
-        Some(ServerInfo {
+        Some(MountInfo {
             name,
             details,
             protocol,
@@ -221,7 +223,7 @@ mod tests {
 
         let info = "STR;VargaRTKhr;Is near: Zagreb, Zagreb;RTCM 3.2;1006(1),1033(1),1074(1),1084(1),1094(1),1124(1),1230(1);;GPS+GLO+GAL+BDS;SNIP;HRV;46.44;16.50;1;0;sNTRIP;none;B;N;0;\n";
 
-        let server_info = ServerInfo::parse(info).unwrap();
+        let server_info = MountInfo::parse(info).unwrap();
 
         assert_eq!(server_info.name, "VargaRTKhr");
         assert_eq!(server_info.details, "Is near: Zagreb, Zagreb");
@@ -271,7 +273,7 @@ mod tests {
 
         debug!("Lines: {:?}", &lines[..10]);
 
-        let snip_info = SnipInfo::parse(lines.iter().cloned());
+        let snip_info = ServerInfo::parse(lines.iter().cloned());
 
         debug!("SNIP Info: {:#?}", snip_info);
     }
@@ -310,7 +312,7 @@ mod tests {
 
         trace!("Lines: {:?}", &lines[..10]);
 
-        let snip_info = SnipInfo::parse(lines.iter().cloned());
+        let snip_info = ServerInfo::parse(lines.iter().cloned());
 
         trace!("SNIP Info: {:#?}", snip_info);
     }

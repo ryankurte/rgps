@@ -12,9 +12,9 @@ use tokio::{
         mpsc::{UnboundedReceiver, unbounded_channel},
     },
 };
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 
-use crate::ntrip::{ServerInfo, SnipInfo};
+use crate::ntrip::{MountInfo, ServerInfo};
 
 use super::{NtripConfig, RtcmProvider, parser::ParsingNtripClient};
 
@@ -25,7 +25,7 @@ pub struct RtcmClient {
 }
 
 impl RtcmClient {
-    pub async fn list_mounts(config: NtripConfig) -> Result<SnipInfo, anyhow::Error> {
+    pub async fn list_mounts(config: NtripConfig) -> Result<ServerInfo, anyhow::Error> {
         let client = reqwest::Client::builder()
             .http1_ignore_invalid_headers_in_responses(true)
             .http09_responses()
@@ -56,38 +56,70 @@ impl RtcmClient {
 
         let lines = body.lines().collect::<Vec<&str>>();
 
-        let snip_info = SnipInfo::parse(lines.iter().cloned());
+        let snip_info = ServerInfo::parse(lines.iter().cloned());
 
         Ok(snip_info)
     }
 
-    pub async fn connect(
+    pub async fn mount(
         config: NtripConfig,
         mount: impl ToString,
         exit_tx: BroadcastSender<()>,
     ) -> Result<Self, anyhow::Error> {
         // Generate NTRIP URL
-        let url = format!(
-            "ntrip://{}:{}@{}/{}",
-            config.user,
-            config.pass,
-            config.host,
-            mount.to_string()
-        );
+        let url = if config.user != "" {
+            format!("http://{}:{}/{}", config.host, config.port, mount.to_string())
+        } else {
+            format!("http://{}:{}/{}", config.host, config.port, mount.to_string())
+        };
 
         debug!("Connecting to NTRIP URL: {}", url);
 
-        // Connect to NTRIP caster
-        let raw_client = robust_ntrip_client::RobustNtripClient::new(
-            &url,
-            RobustNtripClientOptions {
-                timeout: Some(std::time::Duration::from_secs(5)),
-                ..Default::default()
+        // Setup HTTP client for NTRIP messaging
+        let client = reqwest::Client::builder()
+            // .tcp_keepalive(std::time::Duration::from_secs(5))
+            .http1_ignore_invalid_headers_in_responses(true)
+            .http1_allow_obsolete_multiline_headers_in_responses(true)
+            .http1_allow_spaces_after_header_name_in_responses(true)
+            .http09_responses()
+            .http1_only()
+            .user_agent(format!(
+                "NTRIP {}/{}",
+                env!("CARGO_PKG_NAME"),
+                env!("CARGO_PKG_VERSION")
+            ))
+            .build()
+            .unwrap();
+
+        // Build NTRIP request
+        let mut req = client
+            .request(Method::GET, &url)
+            .header("Ntrip-Version", "Ntrip/2.0")
+            .header("Accept", "*/*");
+
+        // Add basic auth if username or password provided
+        if config.user != "" || config.pass != "" {
+            req = req.basic_auth(config.user.clone(), Some(config.pass.clone()));
+        }
+        // Finalise request
+        let req = req
+            .build()
+            .unwrap();
+
+        // Issue request to NTRIP server and check response status
+        let mut exit_rx = exit_tx.subscribe();
+        let mut response = select!{
+            r = client.execute(req) => r?,
+            _ = exit_rx.recv() => {
+                return Err(anyhow::anyhow!("NTRIP connection aborted on exit signal"));
             },
-        )
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to create NTRIP client: {}", e))?;
-        let mut ntrip = ParsingNtripClient::new(raw_client);
+        };
+        if !response.status().is_success() {
+            return Err(anyhow::anyhow!(
+                "NTRIP server returned error status: {}",
+                response.status()
+            ));
+        }
 
         // Spawn a task to handle incoming NTRIP data
 
@@ -96,33 +128,31 @@ impl RtcmClient {
         let _rx_handle = tokio::task::spawn(async move {
             loop {
                 select! {
-                    n = ntrip.next() => match n {
-                        Ok(m) => {
-                            debug!("Received NTRIP data message {}, {} bytes", m.message_number, m.frame_data.len());
+                    d = response.chunk() => match d {
+                        Ok(Some(d)) => {
+                            debug!("Received {} byte chunk", d.len());
 
-                            let m = match MessageFrame::new(&m.frame_data) {
-                                Ok(frame) => frame.get_message(),
-                                Err(e) => {
-                                    error!("Failed to parse RTCM message frame: {}", e);
-                                    continue;
-                                }
-                            };
+                            debug!("{}", String::from_utf8_lossy(&d));
 
-                            debug!("Parsed RTCM message: {:?}", m);
+                            //debug!("Parsed RTCM message: {:?}", m);
 
-                            ntrip_tx.send(m).unwrap();
+                            //ntrip_tx.send(m).unwrap();
                         },
+                        Ok(None) => {
+                            continue;
+                        }
                         Err(e) => {
-                            error!("NTRIP error: {}", e);
+                            error!("HTTP chunk error: {}", e);
                             break;
                         },
                     },
                     _ = exit_rx.recv() => {
-                        debug!("Exiting NTRIP read loop on signal");
+                        error!("Exiting NTRIP read loop on signal");
                         break;
                     }
                 }
             }
+            warn!("NTRIP read loop exiting");
         });
 
         Ok(RtcmClient {
@@ -140,5 +170,57 @@ impl Stream for RtcmClient {
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
         self.ntrip_rx.poll_recv(cx)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use http::{header::USER_AGENT, HeaderMap, HeaderValue};
+    use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpStream};
+    use tracing::debug;
+
+    fn setup_logging() {
+        let _ = tracing_subscriber::FmtSubscriber::builder()
+            .compact()
+            .without_time()
+            .with_max_level(tracing::level_filters::LevelFilter::TRACE)
+            .try_init();
+    }
+
+
+    #[tokio::test]
+    async fn test_ntrip_wtf() {
+        setup_logging();
+
+        debug!("Connecting to NTRIP server");
+        let mut sock = TcpStream::connect("3.143.243.81:2101").await.unwrap();
+
+        let mut headers = HeaderMap::new();
+        headers.append(USER_AGENT, HeaderValue::from_str(&format!(
+                "NTRIP {}/{}",
+                env!("CARGO_PKG_NAME"),
+                env!("CARGO_PKG_VERSION")
+            )).unwrap());
+
+        headers.append("Ntrip-Version", HeaderValue::from_static("Ntrip/2.0"));
+        headers.append("Accept", HeaderValue::from_static("*/*"));
+
+        debug!("Write HTTP request");
+        sock.write_all(b"GET /AFUMRTCM HTTP/1.1\r\n").await.unwrap();
+        sock.write_all(b"Host: 3.143.243.81:2101\r\n").await.unwrap();
+
+        debug!("Writing headers");
+        for h in headers.iter() {
+            sock.write_all(format!("{}: {}\r\n", h.0.as_str(), h.1.to_str().unwrap()).as_bytes()).await.unwrap();
+        }
+        sock.flush().await.unwrap();
+
+        debug!("Reading response");
+
+        let mut buf = vec![0; 1024];
+        let n = sock.read(&mut buf).await.unwrap();
+        debug!("Read {} bytes", n);
+        debug!("\r\n{}", String::from_utf8_lossy(&buf[..n]));
+
     }
 }

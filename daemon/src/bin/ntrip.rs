@@ -1,7 +1,7 @@
 use clap::Parser;
 use futures::StreamExt;
 use geoutils::Location;
-use gpsrs_daemon::ntrip::{NtripConfig, RtcmClient, RtcmProvider, ServerInfo};
+use gpsrs_daemon::ntrip::{NtripConfig, RtcmClient};
 use tokio::select;
 use tracing::{debug, error, info, level_filters::LevelFilter};
 use tracing_subscriber::{EnvFilter, fmt::Subscriber as FmtSubscriber};
@@ -108,7 +108,7 @@ async fn main() -> Result<(), anyhow::Error> {
             debug!("Connecting to NTRIP server");
 
             // Setup the NTRIP client
-            let mut client = RtcmClient::connect(args.ntrip_cfg, mount, exit_tx.clone())
+            let mut client = RtcmClient::mount(args.ntrip_cfg, mount, exit_tx.clone())
                 .await
                 .unwrap();
 
