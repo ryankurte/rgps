@@ -192,8 +192,11 @@ mod tests {
     async fn test_ntrip_wtf() {
         setup_logging();
 
+        const HOST: &str = "192.168.0.158:2101";
+        const MOUNT: &str = "ARGOACU";
+
         debug!("Connecting to NTRIP server");
-        let mut sock = TcpStream::connect("3.143.243.81:2101").await.unwrap();
+        let mut sock = TcpStream::connect(HOST).await.unwrap();
 
         let mut headers = HeaderMap::new();
         headers.append(USER_AGENT, HeaderValue::from_str(&format!(
@@ -206,8 +209,8 @@ mod tests {
         headers.append("Accept", HeaderValue::from_static("*/*"));
 
         debug!("Write HTTP request");
-        sock.write_all(b"GET /AFUMRTCM HTTP/1.1\r\n").await.unwrap();
-        sock.write_all(b"Host: 3.143.243.81:2101\r\n").await.unwrap();
+        sock.write_all(format!("GET /{} HTTP/1.1\r\n", MOUNT).as_bytes()).await.unwrap();
+        sock.write_all(format!("Host: {}\r\n", HOST).as_bytes()).await.unwrap();
 
         debug!("Writing headers");
         for h in headers.iter() {
@@ -217,10 +220,13 @@ mod tests {
 
         debug!("Reading response");
 
-        let mut buf = vec![0; 1024];
+        for i in 0..10 {
+                    let mut buf = vec![0; 1024];
         let n = sock.read(&mut buf).await.unwrap();
         debug!("Read {} bytes", n);
         debug!("\r\n{}", String::from_utf8_lossy(&buf[..n]));
+        }
+
 
     }
 }
