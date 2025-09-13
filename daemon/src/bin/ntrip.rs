@@ -1,6 +1,7 @@
 use clap::Parser;
 use futures::StreamExt;
-use gpsrs_daemon::ntrip::{NtripConfig, RtcmClient, RtcmProvider};
+use geoutils::Location;
+use gpsrs_daemon::ntrip::{NtripConfig, RtcmClient, RtcmProvider, ServerInfo};
 use tokio::select;
 use tracing::{debug, error, info, level_filters::LevelFilter};
 use tracing_subscriber::{EnvFilter, fmt::Subscriber as FmtSubscriber};
@@ -11,17 +12,31 @@ struct Args {
     #[clap(flatten)]
     pub ntrip_cfg: NtripConfig,
 
-    /// NTRIP mount
-    #[clap()]
-    pub ntrip_mount: String,
+    #[clap(subcommand)]
+    pub command: Commands,
 
     #[clap(long, default_value = "trace")]
     /// Set log level
     pub log_level: LevelFilter,
 }
 
+#[derive(Clone, PartialEq, Debug, Parser)]
+pub enum Commands {
+    List,
+    FindNearest {
+        #[clap()]
+        lat: f64,
+        #[clap()]
+        lon: f64,
+    },
+    Subscribe {
+        #[clap()]
+        mount: String,
+    },
+}
+
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), anyhow::Error> {
     // Parse command line arguments
     let args = Args::parse();
 
@@ -47,31 +62,78 @@ async fn main() {
         e.send(()).unwrap();
     });
 
-    debug!("Connecting to NTRIP server");
+    match args.command {
+        Commands::List => {
+            // List available NTRIP mounts using SNIP
+            info!("Listing NTRIP mounts");
 
-    // Setup the NTRIP client
-    let mut client = RtcmClient::connect(args.ntrip_cfg, args.ntrip_mount, exit_tx.clone())
-        .await
-        .unwrap();
+            let info = RtcmClient::list_mounts(args.ntrip_cfg).await.unwrap();
 
-    // Process incoming RTCM messages
-    loop {
-        select! {
-            m = client.next() => match m {
-                Some(m) => {
-                    info!("Received RTCM message: {:?}", m);
-                },
-                None => {
-                    error!("NTRIP client stream ended");
-                    break;
+            for s in info.services {
+                info!(
+                    "{} - {} ({:.3}, {:.3})",
+                    s.name,
+                    s.details,
+                    s.location.latitude(),
+                    s.location.longitude()
+                );
+            }
+        }
+        Commands::FindNearest { lat, lon } => {
+            // Find the nearest NTRIP mount to the specified location
+            info!("Finding nearest NTRIP mount to ({}, {})", lat, lon);
+
+            let info = RtcmClient::list_mounts(args.ntrip_cfg).await.unwrap();
+
+            let target_location = Location::new(lat, lon);
+
+            match info.find_nearest(&target_location) {
+                Some((s, d)) => {
+                    info!(
+                        "Nearest mount: {} - {} ({:.3}, {:.3}), {:.3} km away",
+                        s.name,
+                        s.details,
+                        s.location.latitude(),
+                        s.location.longitude(),
+                        d / 1000.0
+                    );
                 }
-            },
-            _ = exit_rx.recv() => {
-                info!("Exiting on signal");
-                break;
+                None => {
+                    info!("No mounts found");
+                }
+            }
+        }
+        Commands::Subscribe { mount } => {
+            // Subscribe to the specified NTRIP mount
+            debug!("Connecting to NTRIP server");
+
+            // Setup the NTRIP client
+            let mut client = RtcmClient::connect(args.ntrip_cfg, mount, exit_tx.clone())
+                .await
+                .unwrap();
+
+            // Process incoming RTCM messages
+            loop {
+                select! {
+                    m = client.next() => match m {
+                        Some(m) => {
+                            info!("Received RTCM message: {:?}", m);
+                        },
+                        None => {
+                            error!("NTRIP client stream ended");
+                            break;
+                        }
+                    },
+                    _ = exit_rx.recv() => {
+                        info!("Exiting on signal");
+                        break;
+                    }
+                }
             }
         }
     }
 
     debug!("Exiting");
+
+    Ok(())
 }

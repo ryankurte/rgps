@@ -1,11 +1,18 @@
+use std::str::FromStr;
+
 use clap::Parser;
 use isocountry::CountryCode;
 use strum::{Display, EnumString, VariantNames};
+use tracing::debug;
 
 mod client;
 pub use client::RtcmClient;
 
 mod linz;
+
+mod snip;
+pub use snip::{Constellation, Network, Protocol, ServerInfo, SnipInfo};
+
 pub(crate) mod parser;
 
 /// Credentials for an NTRIP (RTCM) service
@@ -17,11 +24,7 @@ pub struct NtripConfig {
     #[clap(long = "ntrip-pass", env = "NTRIP_PASS", default_value = "")]
     pass: String,
 
-    #[clap(
-        long = "ntrip-host",
-        env = "NTRIP_HOST",
-        default_value = "positionz-rt.linz.govt.nz"
-    )]
+    #[clap(long = "ntrip-host", env = "NTRIP_HOST", default_value = "rtk2go.com")]
     host: String,
 
     #[clap(long = "ntrip-port", env = "NTRIP_PORT", default_value_t = 2101)]
@@ -76,38 +79,17 @@ impl RtcmProvider {
 #[cfg(test)]
 mod tests {
     use hyper::{Method, Request, Uri};
-    use hyper_util::rt::TokioExecutor;
-    use tracing::{debug, info, level_filters::LevelFilter};
+    use rtcm_rs::MessageFrame;
+    use tracing::{debug, info, level_filters::LevelFilter, trace};
     use tracing_subscriber::FmtSubscriber;
 
     use super::*;
 
-    #[tokio::test]
-    async fn test_ntrip_rtk2go() {
+    fn setup_logging() {
         let _ = FmtSubscriber::builder()
             .compact()
             .without_time()
-            .with_max_level(LevelFilter::TRACE)
+            .with_max_level(LevelFilter::DEBUG)
             .try_init();
-
-        let client = reqwest::Client::builder()
-            .http1_ignore_invalid_headers_in_responses(true)
-            .http09_responses()
-            .user_agent(format!("NTRIP {}/{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION")))
-            .build()
-            .unwrap();
-
-        let req = client.request(Method::GET, "http://rtk2go.com:2101")
-            .header("Ntrip-Version", "Ntrip/2.0")
-            .build().unwrap();
-
-        let res = client.execute(req).await.expect("Fetch failed");
-
-        info!("Fetched NTRIP response: {:?}", res.status());
-
-        assert!(res.status().is_success());
-
-        debug!("Response: {:?}", res.text().await.unwrap());
-
     }
 }

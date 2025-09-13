@@ -1,5 +1,6 @@
 use clap::Parser;
 use futures::Stream;
+use hyper::Method;
 use isocountry::CountryCode;
 use robust_ntrip_client::RobustNtripClientOptions;
 use rtcm_rs::{Message, MessageFrame, next_msg_frame};
@@ -13,6 +14,8 @@ use tokio::{
 };
 use tracing::{debug, error};
 
+use crate::ntrip::{ServerInfo, SnipInfo};
+
 use super::{NtripConfig, RtcmProvider, parser::ParsingNtripClient};
 
 /// RTCM NTRIP Client
@@ -22,6 +25,42 @@ pub struct RtcmClient {
 }
 
 impl RtcmClient {
+    pub async fn list_mounts(config: NtripConfig) -> Result<SnipInfo, anyhow::Error> {
+        let client = reqwest::Client::builder()
+            .http1_ignore_invalid_headers_in_responses(true)
+            .http09_responses()
+            .user_agent(format!(
+                "NTRIP {}/{}",
+                env!("CARGO_PKG_NAME"),
+                env!("CARGO_PKG_VERSION")
+            ))
+            .build()
+            .unwrap();
+
+        // TODO: auth etc.
+
+        let req = client
+            .request(
+                Method::GET,
+                format!("http://{}:{}", config.host, config.port),
+            )
+            .header("Ntrip-Version", "Ntrip/2.0")
+            .build()
+            .unwrap();
+
+        let res = client.execute(req).await?;
+
+        debug!("Fetched NTRIP response: {:?}", res.status());
+
+        let body = res.text().await?;
+
+        let lines = body.lines().collect::<Vec<&str>>();
+
+        let snip_info = SnipInfo::parse(lines.iter().cloned());
+
+        Ok(snip_info)
+    }
+
     pub async fn connect(
         config: NtripConfig,
         mount: impl ToString,
