@@ -30,6 +30,8 @@ hyper = { version = "*", features = [ "full" ] }
 hyper-util = { version = "*", features = [ "full" ] }
 serialport5 = "5.0.2"
 http = "*"
+crc-any = "*"
+bytebuffer = "*"
 
 [[bin]]
 name = "gpsd"

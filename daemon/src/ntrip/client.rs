@@ -1,4 +1,5 @@
 use clap::Parser;
+use crc_any::CRC;
 use futures::Stream;
 use hyper::Method;
 use isocountry::CountryCode;
@@ -175,9 +176,14 @@ impl Stream for RtcmClient {
 
 #[cfg(test)]
 mod tests {
+    use std::io::BufRead;
+
+    use bytebuffer::ByteBuffer;
+    use bytes::{Buf, BufMut, Bytes, BytesMut};
     use http::{header::USER_AGENT, HeaderMap, HeaderValue};
+    use rtcm_rs::MessageFrame;
     use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpStream};
-    use tracing::debug;
+    use tracing::{debug, error};
 
     fn setup_logging() {
         let _ = tracing_subscriber::FmtSubscriber::builder()
@@ -220,13 +226,85 @@ mod tests {
 
         debug!("Reading response");
 
+        let mut buff = BytesMut::with_capacity(1024);
+
         for i in 0..10 {
-                    let mut buf = vec![0; 1024];
-        let n = sock.read(&mut buf).await.unwrap();
-        debug!("Read {} bytes", n);
-        debug!("\r\n{}", String::from_utf8_lossy(&buf[..n]));
+            // Read from socket
+            let n = sock.read_buf(&mut buff).await.unwrap();
+            debug!("Read {} bytes, current buffer {} bytes", n, buff.len());
+            debug!("Appended {:02x?}", &buff[buff.len()-n..][..n]);
+
+            // Parse response status
+            const STATUS: &str = "ICY 200 OK\r\n";
+            if buff[..n].starts_with(STATUS.as_bytes()) {
+                debug!("Got status ICY 200 OK");
+                let _ = buff.split_to(STATUS.len());
+            }
+
+            // Attempt to parse frames
+            match MessageFrame::new(&buff[..]) {
+                Ok(f) => {
+                    debug!("Parsed RTCM message: {:?} (consumed {} bytes)", f.get_message(), f.frame_len());
+                    let _ = buff.split_to(f.frame_len());
+                },
+                Err(e) => {
+                    error!("RTCM parse error: {}", e);
+                }
+            }
+
         }
 
 
+    }
+}
+
+pub struct RtcmHeader {
+    pub length: u16,
+    pub message_number: Option<u16>,
+}
+
+impl RtcmHeader {
+    pub fn parse(data: &[u8]) -> Result<Self, ()> {
+        // Check minimum data length
+        if data.len() < 6 {
+            return Err(());
+        }
+        // Check for message identifier
+        if data[0] != 0xd3 {
+            return Err(());
+        }
+        // Parse out length
+        let length: u16 = ((data[1] as u16 & 0b11) << 8) | (data[2] as u16);
+        if data.len() < length as usize + 6 {
+            return Err(());
+        }
+        // Fetch message number if available
+        let message_number = if data.len() >= 8 {
+            Some(((data[3] as u16) << 4) | ((data[4] as u16) >> 4))
+        } else {
+            None
+        };
+
+        Ok(RtcmHeader {
+            length,
+            message_number,
+        })
+    }
+
+    pub fn check_crc(&self, data: &[u8]) -> bool {
+        if data.len() < self.length as usize + 6 {
+            return false;
+        }
+        // Compute CRC over whole message
+        let mut crc24 = CRC::crc24lte_a();
+        crc24.digest(&data[0..self.length as usize + 3]);
+
+        // Load CRC from trailer
+        let msg_crc = ((data[self.length as usize + 3] as u32) << 16)
+            | ((data[self.length as usize + 4] as u32) << 8)
+            | (data[self.length as usize + 5] as u32);
+
+        // Compare computed and trailer
+        msg_crc == crc24.get_crc() as u32
     }
 }
