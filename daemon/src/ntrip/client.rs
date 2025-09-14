@@ -1,41 +1,67 @@
 use std::sync::Arc;
 
 use anyhow::Context;
-use base64::{alphabet::STANDARD, engine::general_purpose, prelude::BASE64_STANDARD, Engine as _};
-use clap::Parser;
-use crc_any::CRC;
-use futures::{AsyncReadExt, Stream};
-use http::{HeaderMap, HeaderValue, header::USER_AGENT};
+use base64::{Engine as _, engine::general_purpose};
+use futures::Stream;
+use http::{header::{InvalidHeaderValue, ToStrError, USER_AGENT}, HeaderMap, HeaderValue};
 use hyper::Method;
-use isocountry::CountryCode;
-use robust_ntrip_client::RobustNtripClientOptions;
-use rtcm_rs::{Message, MessageFrame, next_msg_frame};
-use rustls::pki_types::ServerName;
-use strum::{Display, EnumString, VariantNames};
+use rtcm_rs::{Message, MessageFrame};
+use rustls::pki_types::{InvalidDnsNameError, ServerName};
 use tokio::{
     io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt},
     net::TcpStream,
     select,
     sync::{
         broadcast::Sender as BroadcastSender,
-        mpsc::{unbounded_channel, UnboundedReceiver},
-    }, task::JoinHandle,
+        mpsc::{UnboundedReceiver, unbounded_channel},
+    },
+    task::JoinHandle,
 };
 use tokio_rustls::TlsConnector;
 use tracing::{debug, error, trace, warn};
 
-use crate::ntrip::{MountInfo, ServerInfo};
+use crate::ntrip::{NtripConfig, NtripCredentials, ServerInfo};
 
-use super::{NtripConfig, RtcmProvider};
+/// NTRIP Client, used to connect to an NTRIP (RTCM) service
+pub struct NtripClient {
+    config: NtripConfig,
+    creds: NtripCredentials,
+}
 
-/// RTCM NTRIP Client
-pub struct RtcmClient {
+/// NTRIP Mount handle, used to stream RTCM messages from an NTRIP service
+pub struct NtripHandle {
     _rx_handle: tokio::task::JoinHandle<()>,
     ntrip_rx: UnboundedReceiver<Message>,
 }
 
-impl RtcmClient {
-    pub async fn list_mounts(config: NtripConfig) -> Result<ServerInfo, anyhow::Error> {
+#[derive(Debug, thiserror::Error)]
+pub enum NtripClientError {
+    #[error("Io error: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("Reqwest error: {0}")]
+    Reqwest(#[from] reqwest::Error),
+
+    #[error("Invalid header value {0}")]
+    InvalidHeaderValue(#[from] InvalidHeaderValue),
+
+    #[error("Invalid DNS name {0}")]
+    InvalidDnsName(#[from] InvalidDnsNameError),
+
+    #[error("Header ToStrError error {0}")]
+    ToStrError(#[from] ToStrError),
+
+    #[error("Response error")]
+    ResponseError(String),
+}
+
+impl NtripClient {
+    pub async fn new(config: NtripConfig, creds: NtripCredentials) -> Result<Self, NtripClientError> {
+        Ok(NtripClient { config, creds })
+    }
+
+    /// List available mounts on the NTRIP server
+    pub async fn list_mounts(&mut self) -> Result<ServerInfo, NtripClientError> {
         let client = reqwest::Client::builder()
             .http1_ignore_invalid_headers_in_responses(true)
             .http09_responses()
@@ -44,20 +70,18 @@ impl RtcmClient {
                 env!("CARGO_PKG_NAME"),
                 env!("CARGO_PKG_VERSION")
             ))
-            .build()
-            .unwrap();
+            .build()?;
 
         // TODO: auth etc.
-        let proto = if config.use_tls { "https" } else { "http" };
+        let proto = if self.config.use_tls { "https" } else { "http" };
 
         let req = client
             .request(
                 Method::GET,
-                format!("{}://{}:{}", proto, config.host, config.port),
+                format!("{}://{}:{}", proto, self.config.host, self.config.port),
             )
             .header("Ntrip-Version", "NTRIP/2.0")
-            .build()
-            .unwrap();
+            .build()?;
 
         let res = client.execute(req).await?;
 
@@ -73,16 +97,20 @@ impl RtcmClient {
     }
 
     pub async fn mount(
-        config: NtripConfig,
+        &mut self,
         mount: impl ToString,
         exit_tx: BroadcastSender<()>,
-    ) -> Result<Self, anyhow::Error> {
+    ) -> Result<NtripHandle, NtripClientError> {
+        debug!(
+            "Connecting to NTRIP server {}/{}",
+            self.config.url(),
+            mount.to_string()
+        );
 
-        debug!("Connecting to NTRIP server {}/{}", config.url(), mount.to_string());
+        let sock = TcpStream::connect(&self.config.url())
+            .await?;
 
-        let sock = TcpStream::connect(&config.url()).await.with_context(|| "Failed to connect to NTRIP server")?;
-        
-       let (rx_handle, ntrip_rx) = match config.use_tls {
+        let (rx_handle, ntrip_rx) = match self.config.use_tls {
             true => {
                 debug!("Using TLS connection");
 
@@ -93,28 +121,48 @@ impl RtcmClient {
                     .with_root_certificates(root_cert_store)
                     .with_no_client_auth();
                 let connector = TlsConnector::from(Arc::new(tls_config));
-                let dnsname = ServerName::try_from(config.host
-                .clone()).unwrap();
+                let dnsname = ServerName::try_from(self.config.host.clone())?;
 
-                let tls_sock = connector.connect(dnsname, sock).await.with_context(|| "Failed to establish TLS connection")?;
+                let tls_sock = connector
+                    .connect(dnsname, sock)
+                    .await?;
 
-                Self::handle_connection(&config, &mount.to_string(), exit_tx.clone(), tls_sock).await.with_context(|| "Connection handler failed")?
-
-            },
+                Self::handle_connection(
+                    &self.config,
+                    &self.creds,
+                    &mount.to_string(),
+                    exit_tx.clone(),
+                    tls_sock,
+                )
+                .await?
+            }
             false => {
                 debug!("Using plain TCP connection");
-                
-                Self::handle_connection(&config, &mount.to_string(), exit_tx.clone(), sock).await.with_context(|| "Connection handler failed")?
+
+                Self::handle_connection(
+                    &self.config,
+                    &self.creds,
+                    &mount.to_string(),
+                    exit_tx.clone(),
+                    sock,
+                )
+                .await?
             }
         };
 
-        Ok(RtcmClient {
+        Ok(NtripHandle {
             _rx_handle: rx_handle,
             ntrip_rx,
         })
     }
 
-    pub async fn handle_connection(config: &NtripConfig, mount: &str, exit_tx: BroadcastSender<()>, mut sock: impl AsyncRead + AsyncWrite + Unpin + Send + 'static) -> Result<(JoinHandle<()>, UnboundedReceiver<Message>), anyhow::Error>{
+    pub async fn handle_connection(
+        config: &NtripConfig,
+        creds: &NtripCredentials,
+        mount: &str,
+        exit_tx: BroadcastSender<()>,
+        mut sock: impl AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    ) -> Result<(JoinHandle<()>, UnboundedReceiver<Message>), NtripClientError> {
         // Setup HTTP headers
         let mut headers = HeaderMap::new();
         headers.append(
@@ -123,8 +171,7 @@ impl RtcmClient {
                 "NTRIP {}/{}",
                 env!("CARGO_PKG_NAME"),
                 env!("CARGO_PKG_VERSION")
-            ))
-            .unwrap(),
+            ))?,
         );
 
         headers.append("Ntrip-Version", HeaderValue::from_static("NTRIP/2.0"));
@@ -132,9 +179,12 @@ impl RtcmClient {
         headers.append("Connection", HeaderValue::from_static("close"));
 
         // If we have credentials, add the Authorization header
-        if !config.user.is_empty() {
-            let auth = general_purpose::STANDARD.encode(format!("{}:{}", config.user, config.pass));
-            headers.append( "Authorization", HeaderValue::from_str(&format!("Basic {}", auth)).unwrap());
+        if !creds.user.is_empty() {
+            let auth = general_purpose::STANDARD.encode(format!("{}:{}", creds.user, creds.pass));
+            headers.append(
+                "Authorization",
+                HeaderValue::from_str(&format!("Basic {}", auth))?,
+            );
         }
 
         debug!("Headers: {:#?}", headers);
@@ -142,25 +192,51 @@ impl RtcmClient {
         // Write HTTP request
         debug!("Write HTTP request");
         sock.write_all(format!("GET /{} HTTP/1.0\r\n", mount.to_string()).as_bytes())
-            .await
-            .unwrap();
+            .await?;
         sock.write_all(format!("Host: {}\r\n", config.url()).as_bytes())
-            .await
-            .unwrap();
+            .await?;
 
         // Write HTTP headers
         debug!("Writing headers");
         for h in headers.iter() {
-            sock.write_all(format!("{}: {}\r\n", h.0.as_str(), h.1.to_str().unwrap()).as_bytes())
-                .await
-                .unwrap();
+            sock.write_all(format!("{}: {}\r\n", h.0.as_str(), h.1.to_str()?).as_bytes())
+                .await?;
         }
 
-        sock.write_all(b"\r\n").await.unwrap();
-        sock.flush().await.unwrap();
+        sock.write_all(b"\r\n").await?;
+        sock.flush().await?;
 
         debug!("Reading response");
         let mut buff = Vec::with_capacity(1024);
+
+        // Perform a first read to get the response status
+        let n = sock.read_buf(&mut buff).await?;
+        debug!("Read {} bytes, current buffer {} bytes", n, buff.len());
+
+        // Parse out response status
+        let r = String::from_utf8_lossy(&buff[..n]);
+        match r.lines().next() {
+            Some(status) if status.contains("200 OK") => {
+                debug!("Got 200 OK response");
+            }
+            Some(status) => {
+                error!("NTRIP server returned error: {}", status);
+                return Err(NtripClientError::ResponseError(status.to_string()));
+            }
+            None => {
+                error!("NTRIP server returned empty response");
+                return Err(NtripClientError::ResponseError("empty response".into()));
+            }
+        }
+
+        // Flush buffer until the first RTCM message (0xd3)
+        if let Some(i) = buff.iter().enumerate().find(|(_i, b)| **b == 0xd3) {
+            debug!(
+                "Trimming buffer to next potential frame start at index {}",
+                i.0
+            );
+            let _ = buff.drain(..i.0);
+        }
 
         // Spawn a task to handle incoming NTRIP data
 
@@ -177,24 +253,10 @@ impl RtcmClient {
                             debug!("Read {} bytes, current buffer {} bytes", n, buff.len());
                             trace!("Appended {:02x?}", &buff[buff.len()-n..][..n]);
 
+                            // Handle zero length read (connection closed)
                             if n == 0 {
                                 warn!("Zero length response");
-                                exit_tx.send(()).unwrap();
                                 break 'listener;
-                            }
-
-                            // Parse and check / remove response status
-                            const ICY_STATUS: &str = "ICY 200 OK\r\n";
-                            if buff[..n].starts_with(ICY_STATUS.as_bytes()) {
-                                debug!("Got ICY 200 OK");
-                                let _ = buff.drain(..ICY_STATUS.len());
-                            }
-
-                            // TODO: what about other types of HTTP?
-                            const HTTP_STATUS: &str = "HTTP/1.1 200 OK\r\n";
-                            if buff[..n].starts_with(HTTP_STATUS.as_bytes()) {
-                                debug!("Got HTTP/1.1 200 OK");
-                                let _ = buff.drain(..HTTP_STATUS.len());
                             }
 
                             // Trim any non-message data from the start of the buffer
@@ -271,7 +333,8 @@ impl RtcmClient {
     }
 }
 
-impl Stream for RtcmClient {
+/// [Stream] NTRIP [Message]'s from an [NtripHandle]
+impl Stream for NtripHandle {
     type Item = Message;
 
     fn poll_next(
@@ -284,11 +347,13 @@ impl Stream for RtcmClient {
 
 #[cfg(test)]
 mod tests {
+    use std::env;
+
     use futures::StreamExt;
 
-    use tracing::{debug};
+    use tracing::debug;
 
-    use crate::ntrip::RtcmClient;
+    use crate::ntrip::{NtripClient, NtripCredentials};
 
     fn setup_logging() {
         let _ = tracing_subscriber::FmtSubscriber::builder()
@@ -299,26 +364,33 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "Requires NTRIP config from the environment"]
     async fn test_ntrip_client() {
         setup_logging();
-
-        const HOST: &str = "192.168.0.158";
-        const MOUNT: &str = "ARGOACU";
 
         debug!("Connecting to NTRIP server");
 
         let (exit_tx, _exit_rx) = tokio::sync::broadcast::channel(1);
 
+        let mount = env::var("NTRIP_MOUNT").unwrap_or("ARGOACU".into());
         let config = crate::ntrip::NtripConfig {
-            host: HOST.into(),
+            host: env::var("NTRIP_HOST").unwrap_or("127.0.0.1".into()),
             ..Default::default()
         };
-        let mut client = RtcmClient::mount(config, MOUNT.to_string(), exit_tx.clone())
+        let creds = NtripCredentials {
+            user: env::var("NTRIP_USER").unwrap_or("user".into()),
+            pass: env::var("NTRIP_PASS").unwrap_or("pass".into()),
+        };
+
+        let mut client = NtripClient::new(config, creds).await.unwrap();
+
+        let mut h = client
+            .mount(mount.to_string(), exit_tx.clone())
             .await
             .unwrap();
 
         for _i in 0..10 {
-            let m = client.next().await.unwrap();
+            let m = h.next().await.unwrap();
             debug!("Got RTCM message: {:?}", m);
         }
 

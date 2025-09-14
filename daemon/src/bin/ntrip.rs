@@ -1,7 +1,7 @@
 use clap::Parser;
 use futures::StreamExt;
 use geoutils::Location;
-use gpsrs_daemon::ntrip::{NtripConfig, RtcmClient};
+use gpsrs_daemon::ntrip::{NtripClient, NtripConfig, NtripCredentials};
 use tokio::select;
 use tracing::{debug, error, info, level_filters::LevelFilter};
 use tracing_subscriber::{EnvFilter, fmt::Subscriber as FmtSubscriber};
@@ -9,8 +9,12 @@ use tracing_subscriber::{EnvFilter, fmt::Subscriber as FmtSubscriber};
 /// GPSD(RS) Control Utility
 #[derive(Clone, PartialEq, Debug, Parser)]
 struct Args {
+    #[clap()]
+    /// NTRIP server identifier or URI
+    pub ntrip_host: NtripConfig,
+
     #[clap(flatten)]
-    pub ntrip_cfg: NtripConfig,
+    pub ntrip_creds: NtripCredentials,
 
     #[clap(subcommand)]
     pub command: Commands,
@@ -62,12 +66,14 @@ async fn main() -> Result<(), anyhow::Error> {
         e.send(()).unwrap();
     });
 
+    let mut client = NtripClient::new(args.ntrip_host.clone(), args.ntrip_creds.clone()).await?;
+
     match args.command {
         Commands::List => {
             // List available NTRIP mounts using SNIP
             info!("Listing NTRIP mounts");
 
-            let info = RtcmClient::list_mounts(args.ntrip_cfg).await.unwrap();
+            let info = client.list_mounts().await.unwrap();
 
             for s in info.services {
                 info!(
@@ -83,7 +89,7 @@ async fn main() -> Result<(), anyhow::Error> {
             // Find the nearest NTRIP mount to the specified location
             info!("Finding nearest NTRIP mount to ({}, {})", lat, lon);
 
-            let info = RtcmClient::list_mounts(args.ntrip_cfg).await.unwrap();
+            let info = client.list_mounts().await.unwrap();
 
             let target_location = Location::new(lat, lon);
 
@@ -108,7 +114,7 @@ async fn main() -> Result<(), anyhow::Error> {
             debug!("Connecting to NTRIP server");
 
             // Setup the NTRIP client
-            let mut client = RtcmClient::mount(args.ntrip_cfg, mount, exit_tx.clone()).await?;
+            let mut client = client.mount(mount, exit_tx.clone()).await?;
 
             // Process incoming RTCM messages
             loop {

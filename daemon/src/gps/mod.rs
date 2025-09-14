@@ -1,6 +1,1 @@
-
-
-pub struct Gps {
-
-}
-
+pub struct Gps {}
