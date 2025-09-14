@@ -1,21 +1,27 @@
+use std::sync::Arc;
+
+use anyhow::Context;
+use base64::{alphabet::STANDARD, engine::general_purpose, prelude::BASE64_STANDARD, Engine as _};
 use clap::Parser;
 use crc_any::CRC;
-use futures::Stream;
+use futures::{AsyncReadExt, Stream};
 use http::{HeaderMap, HeaderValue, header::USER_AGENT};
 use hyper::Method;
 use isocountry::CountryCode;
 use robust_ntrip_client::RobustNtripClientOptions;
 use rtcm_rs::{Message, MessageFrame, next_msg_frame};
+use rustls::pki_types::ServerName;
 use strum::{Display, EnumString, VariantNames};
 use tokio::{
-    io::{AsyncReadExt as _, AsyncWriteExt as _},
+    io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt},
     net::TcpStream,
     select,
     sync::{
         broadcast::Sender as BroadcastSender,
-        mpsc::{UnboundedReceiver, unbounded_channel},
-    },
+        mpsc::{unbounded_channel, UnboundedReceiver},
+    }, task::JoinHandle,
 };
+use tokio_rustls::TlsConnector;
 use tracing::{debug, error, trace, warn};
 
 use crate::ntrip::{MountInfo, ServerInfo};
@@ -42,13 +48,14 @@ impl RtcmClient {
             .unwrap();
 
         // TODO: auth etc.
+        let proto = if config.use_tls { "https" } else { "http" };
 
         let req = client
             .request(
                 Method::GET,
-                format!("http://{}:{}", config.host, config.port),
+                format!("{}://{}:{}", proto, config.host, config.port),
             )
-            .header("Ntrip-Version", "Ntrip/2.0")
+            .header("Ntrip-Version", "NTRIP/2.0")
             .build()
             .unwrap();
 
@@ -70,13 +77,44 @@ impl RtcmClient {
         mount: impl ToString,
         exit_tx: BroadcastSender<()>,
     ) -> Result<Self, anyhow::Error> {
-        // Generate NTRIP URL
-        let url = format!("{}:{}", config.host, config.port);
 
-        debug!("Connecting to NTRIP server {url}/{}", mount.to_string());
+        debug!("Connecting to NTRIP server {}/{}", config.url(), mount.to_string());
 
-        let mut sock = TcpStream::connect(&url).await.unwrap();
+        let sock = TcpStream::connect(&config.url()).await.with_context(|| "Failed to connect to NTRIP server")?;
+        
+       let (rx_handle, ntrip_rx) = match config.use_tls {
+            true => {
+                debug!("Using TLS connection");
 
+                let mut root_cert_store = rustls::RootCertStore::empty();
+                root_cert_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+
+                let tls_config = rustls::ClientConfig::builder()
+                    .with_root_certificates(root_cert_store)
+                    .with_no_client_auth();
+                let connector = TlsConnector::from(Arc::new(tls_config));
+                let dnsname = ServerName::try_from(config.host
+                .clone()).unwrap();
+
+                let tls_sock = connector.connect(dnsname, sock).await.with_context(|| "Failed to establish TLS connection")?;
+
+                Self::handle_connection(&config, &mount.to_string(), exit_tx.clone(), tls_sock).await.with_context(|| "Connection handler failed")?
+
+            },
+            false => {
+                debug!("Using plain TCP connection");
+                
+                Self::handle_connection(&config, &mount.to_string(), exit_tx.clone(), sock).await.with_context(|| "Connection handler failed")?
+            }
+        };
+
+        Ok(RtcmClient {
+            _rx_handle: rx_handle,
+            ntrip_rx,
+        })
+    }
+
+    pub async fn handle_connection(config: &NtripConfig, mount: &str, exit_tx: BroadcastSender<()>, mut sock: impl AsyncRead + AsyncWrite + Unpin + Send + 'static) -> Result<(JoinHandle<()>, UnboundedReceiver<Message>), anyhow::Error>{
         // Setup HTTP headers
         let mut headers = HeaderMap::new();
         headers.append(
@@ -89,15 +127,24 @@ impl RtcmClient {
             .unwrap(),
         );
 
-        headers.append("Ntrip-Version", HeaderValue::from_static("Ntrip/3.0"));
+        headers.append("Ntrip-Version", HeaderValue::from_static("NTRIP/2.0"));
         headers.append("Accept", HeaderValue::from_static("*/*"));
+        headers.append("Connection", HeaderValue::from_static("close"));
+
+        // If we have credentials, add the Authorization header
+        if !config.user.is_empty() {
+            let auth = general_purpose::STANDARD.encode(format!("{}:{}", config.user, config.pass));
+            headers.append( "Authorization", HeaderValue::from_str(&format!("Basic {}", auth)).unwrap());
+        }
+
+        debug!("Headers: {:#?}", headers);
 
         // Write HTTP request
         debug!("Write HTTP request");
-        sock.write_all(format!("GET /{} HTTP/1.1\r\n", mount.to_string()).as_bytes())
+        sock.write_all(format!("GET /{} HTTP/1.0\r\n", mount.to_string()).as_bytes())
             .await
             .unwrap();
-        sock.write_all(format!("Host: {}\r\n", url).as_bytes())
+        sock.write_all(format!("Host: {}\r\n", config.url()).as_bytes())
             .await
             .unwrap();
 
@@ -108,6 +155,8 @@ impl RtcmClient {
                 .await
                 .unwrap();
         }
+
+        sock.write_all(b"\r\n").await.unwrap();
         sock.flush().await.unwrap();
 
         debug!("Reading response");
@@ -117,7 +166,7 @@ impl RtcmClient {
 
         let (ntrip_tx, ntrip_rx) = unbounded_channel();
         let mut exit_rx = exit_tx.subscribe();
-        let _rx_handle = tokio::task::spawn(async move {
+        let rx_handle = tokio::task::spawn(async move {
             // Track parse errors so we can drop data (or abort) if needed
             let mut error_count = 0;
 
@@ -128,11 +177,34 @@ impl RtcmClient {
                             debug!("Read {} bytes, current buffer {} bytes", n, buff.len());
                             trace!("Appended {:02x?}", &buff[buff.len()-n..][..n]);
 
+                            if n == 0 {
+                                warn!("Zero length response");
+                                exit_tx.send(()).unwrap();
+                                break 'listener;
+                            }
+
                             // Parse and check / remove response status
-                            const STATUS: &str = "ICY 200 OK\r\n";
-                            if buff[..n].starts_with(STATUS.as_bytes()) {
-                                debug!("Got status ICY 200 OK");
-                                let _ = buff.drain(..STATUS.len());
+                            const ICY_STATUS: &str = "ICY 200 OK\r\n";
+                            if buff[..n].starts_with(ICY_STATUS.as_bytes()) {
+                                debug!("Got ICY 200 OK");
+                                let _ = buff.drain(..ICY_STATUS.len());
+                            }
+
+                            // TODO: what about other types of HTTP?
+                            const HTTP_STATUS: &str = "HTTP/1.1 200 OK\r\n";
+                            if buff[..n].starts_with(HTTP_STATUS.as_bytes()) {
+                                debug!("Got HTTP/1.1 200 OK");
+                                let _ = buff.drain(..HTTP_STATUS.len());
+                            }
+
+                            // Trim any non-message data from the start of the buffer
+                            if buff[0] != 0xd3 {
+                                if let Some(i) = buff.iter().enumerate().find(|(_i, b)| **b == 0xd3) {
+                                    warn!("Trimming buffer to next potential frame start at index {}", i.0);
+                                    buff.drain(..i.0);
+
+                                    assert_eq!(buff[0], 0xd3);
+                                }
                             }
 
                             // While we have enough data for a header,
@@ -156,21 +228,13 @@ impl RtcmClient {
                                         error_count = 0;
                                     },
                                     Err(e) => {
-                                        error!("RTCM parse error: {} (count: {})", e, error_count);
+                                        warn!("RTCM parse error: {} (count: {})", e, error_count);
 
                                         // Update error counter
                                         error_count += 1;
 
-                                        // If we have too many errors, drop some data
-                                        if error_count >= 3 {
-                                            if let Some(i) = buff.iter().enumerate().find(|(_i, b)| **b == 0xd3) {
-                                                warn!("Trimming buffer to next potential frame start at index {}", i.0);
-                                                buff.drain(..i.0);
-
-                                                assert_eq!(buff[0], 0xd3);
-                                            }
                                         // If we keep getting errors, abort the connection
-                                        } else if error_count >= 5 {
+                                        if error_count >= 5 {
                                             error!("Too many parse errors, closing connection");
                                             break 'listener;
                                         }
@@ -203,10 +267,7 @@ impl RtcmClient {
             }
         });
 
-        Ok(RtcmClient {
-            _rx_handle,
-            ntrip_rx,
-        })
+        Ok((rx_handle, ntrip_rx))
     }
 }
 
@@ -223,18 +284,9 @@ impl Stream for RtcmClient {
 
 #[cfg(test)]
 mod tests {
-    use std::io::BufRead;
-
-    use bytebuffer::ByteBuffer;
-    use bytes::{Buf, BufMut, Bytes, BytesMut};
     use futures::StreamExt;
-    use http::{HeaderMap, HeaderValue, header::USER_AGENT};
-    use rtcm_rs::MessageFrame;
-    use tokio::{
-        io::{AsyncReadExt, AsyncWriteExt},
-        net::TcpStream,
-    };
-    use tracing::{debug, error};
+
+    use tracing::{debug};
 
     use crate::ntrip::RtcmClient;
 

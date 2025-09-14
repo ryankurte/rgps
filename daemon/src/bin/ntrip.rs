@@ -15,7 +15,7 @@ struct Args {
     #[clap(subcommand)]
     pub command: Commands,
 
-    #[clap(long, default_value = "debug")]
+    #[clap(long, default_value = "info")]
     /// Set log level
     pub log_level: LevelFilter,
 }

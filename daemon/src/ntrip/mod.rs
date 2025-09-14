@@ -25,6 +25,9 @@ pub struct NtripConfig {
 
     #[clap(long = "ntrip-port", env = "NTRIP_PORT", default_value_t = 2101)]
     port: u16,
+
+    #[clap(long = "ntrip-use-tls", env = "NTRIP_USE_TLS", default_value_t = false)]
+    use_tls: bool,
 }
 
 impl Default for NtripConfig {
@@ -34,7 +37,14 @@ impl Default for NtripConfig {
             pass: "".to_string(),
             host: "rtk2go.com".to_string(),
             port: 2101,
+            use_tls: false,
         }
+    }
+}
+
+impl NtripConfig {
+    pub fn url(&self) -> String {
+        format!("{}:{}", self.host, self.port)
     }
 }
 
@@ -52,15 +62,24 @@ impl ToString for RtcmMount {
 /// RTCM NTRIP Provider
 #[derive(Clone, PartialEq, Debug, Parser, EnumString, Display, VariantNames)]
 pub enum RtcmProvider {
+    /// Land Information New Zealand
+    /// 
+    /// Note: requires credentials
     Linz,
+    /// RTK2GO.com free service
     Rtk2Go,
+    /// Positioning Australia
+    /// 
+    /// Note: requires credentials and TLS
+    PosAu,
 }
 
 impl RtcmProvider {
-    pub fn url(&self) -> &str {
+    pub fn host(&self) -> &str {
         match self {
             RtcmProvider::Linz => "positionz-rt.linz.govt.nz",
             RtcmProvider::Rtk2Go => "rtk2go.com",
+            RtcmProvider::PosAu => "ntrip.data.gnss.ga.gov.au",
         }
     }
 
@@ -68,24 +87,16 @@ impl RtcmProvider {
         match self {
             RtcmProvider::Linz => 2101,
             RtcmProvider::Rtk2Go => 2101,
+            RtcmProvider::PosAu => 443,
+        }
+    }
+
+    pub fn use_tls(&self) -> bool {
+        match self {
+            RtcmProvider::Linz => false,
+            RtcmProvider::Rtk2Go => false,
+            RtcmProvider::PosAu => true,
         }
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use hyper::{Method, Request, Uri};
-    use rtcm_rs::MessageFrame;
-    use tracing::{debug, info, level_filters::LevelFilter, trace};
-    use tracing_subscriber::FmtSubscriber;
-
-    use super::*;
-
-    fn setup_logging() {
-        let _ = FmtSubscriber::builder()
-            .compact()
-            .without_time()
-            .with_max_level(LevelFilter::DEBUG)
-            .try_init();
-    }
-}

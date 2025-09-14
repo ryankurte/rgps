@@ -32,6 +32,10 @@ serialport5 = "5.0.2"
 http = "*"
 crc-any = "*"
 bytebuffer = "*"
+base64 = "*"
+tokio-rustls = "*"
+rustls = "*"
+webpki-roots = "1.0.2"
 
 [[bin]]
 name = "gpsd"
