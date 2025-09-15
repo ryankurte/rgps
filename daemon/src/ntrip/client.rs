@@ -3,7 +3,10 @@ use std::sync::Arc;
 use anyhow::Context;
 use base64::{Engine as _, engine::general_purpose};
 use futures::Stream;
-use http::{header::{InvalidHeaderValue, ToStrError, USER_AGENT}, HeaderMap, HeaderValue};
+use http::{
+    HeaderMap, HeaderValue,
+    header::{InvalidHeaderValue, ToStrError, USER_AGENT},
+};
 use hyper::Method;
 use rtcm_rs::{Message, MessageFrame};
 use rustls::pki_types::{InvalidDnsNameError, ServerName};
@@ -56,7 +59,10 @@ pub enum NtripClientError {
 }
 
 impl NtripClient {
-    pub async fn new(config: NtripConfig, creds: NtripCredentials) -> Result<Self, NtripClientError> {
+    pub async fn new(
+        config: NtripConfig,
+        creds: NtripCredentials,
+    ) -> Result<Self, NtripClientError> {
         Ok(NtripClient { config, creds })
     }
 
@@ -107,8 +113,7 @@ impl NtripClient {
             mount.to_string()
         );
 
-        let sock = TcpStream::connect(&self.config.url())
-            .await?;
+        let sock = TcpStream::connect(&self.config.url()).await?;
 
         let (rx_handle, ntrip_rx) = match self.config.use_tls {
             true => {
@@ -123,9 +128,7 @@ impl NtripClient {
                 let connector = TlsConnector::from(Arc::new(tls_config));
                 let dnsname = ServerName::try_from(self.config.host.clone())?;
 
-                let tls_sock = connector
-                    .connect(dnsname, sock)
-                    .await?;
+                let tls_sock = connector.connect(dnsname, sock).await?;
 
                 Self::handle_connection(
                     &self.config,
