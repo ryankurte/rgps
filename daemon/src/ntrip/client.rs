@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use anyhow::Context;
 use base64::{Engine as _, engine::general_purpose};
 use futures::Stream;
 use http::{
@@ -34,7 +33,7 @@ pub struct NtripClient {
 /// NTRIP Mount handle, used to stream RTCM messages from an NTRIP service
 pub struct NtripHandle {
     _rx_handle: tokio::task::JoinHandle<()>,
-    ntrip_rx: UnboundedReceiver<Message>,
+    ntrip_rx: UnboundedReceiver<(Message, Vec<u8>)>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -165,7 +164,7 @@ impl NtripClient {
         mount: &str,
         exit_tx: BroadcastSender<()>,
         mut sock: impl AsyncRead + AsyncWrite + Unpin + Send + 'static,
-    ) -> Result<(JoinHandle<()>, UnboundedReceiver<Message>), NtripClientError> {
+    ) -> Result<(JoinHandle<()>, UnboundedReceiver<(Message, Vec<u8>)>), NtripClientError> {
         // Setup HTTP headers
         let mut headers = HeaderMap::new();
         headers.append(
@@ -253,7 +252,7 @@ impl NtripClient {
                 select! {
                     n = sock.read_buf(&mut buff) => match n {
                         Ok(n) => {
-                            debug!("Read {} bytes, current buffer {} bytes", n, buff.len());
+                            trace!("Read {} bytes, current buffer {} bytes", n, buff.len());
                             trace!("Appended {:02x?}", &buff[buff.len()-n..][..n]);
 
                             // Handle zero length read (connection closed)
@@ -281,10 +280,10 @@ impl NtripClient {
                                         // Parse out message from frame
                                         let m = f.get_message();
 
-                                        debug!("Parsed RTCM message: {:?} (consumed {} bytes)", m, f.frame_len());
+                                        trace!("Parsed RTCM message: {:?} (consumed {} bytes)", m, f.frame_len());
 
                                         // Emit message
-                                        ntrip_tx.send(m).unwrap();
+                                        ntrip_tx.send((m, f.frame_data().to_vec())).unwrap();
 
                                         // Remove parsed data from the buffer
                                         let _ = buff.drain(..f.frame_len());
@@ -338,7 +337,7 @@ impl NtripClient {
 
 /// [Stream] NTRIP [Message]'s from an [NtripHandle]
 impl Stream for NtripHandle {
-    type Item = Message;
+    type Item = (Message, Vec<u8>);
 
     fn poll_next(
         mut self: std::pin::Pin<&mut Self>,

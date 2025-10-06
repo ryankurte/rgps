@@ -45,9 +45,13 @@ ublox = { version = "0.6", default-features = false, features = ["std", "sfrbx-g
 nmea = { version = "0.7.0", features = ["serde"] }
 
 [[bin]]
+name = "gpsd"
+path = "src/bin/gpsd.rs"
+
+[[bin]]
 name = "gps-tool"
-path = "src/bin/gps.rs"
+path = "src/bin/gps-tool.rs"
 
 [[bin]]
 name = "ntrip-tool"
-path = "src/bin/ntrip.rs"
+path = "src/bin/ntrip-tool.rs"

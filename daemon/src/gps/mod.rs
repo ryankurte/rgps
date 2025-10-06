@@ -1,16 +1,17 @@
 use std::sync::{Arc, Mutex};
 
-use futures::Stream;
+use futures::{Sink, Stream};
 use geoutils::Location;
 use nmea::{Nmea, SentenceType};
-use tokio::{io::AsyncReadExt, select};
+use tokio::{io::{AsyncReadExt, AsyncWriteExt}, select};
 use tokio_serial::{SerialPortBuilder, SerialPortBuilderExt as _, SerialStream};
-use tracing::debug;
+use tracing::{debug, trace};
 
 pub struct Gps {
     exit_tx: tokio::sync::broadcast::Sender<()>,
     state: Arc<Mutex<Nmea>>,
     update_rx: tokio::sync::mpsc::UnboundedReceiver<SentenceType>,
+    write_tx: tokio::sync::mpsc::UnboundedSender<Vec<u8>>,
     _handle: tokio::task::JoinHandle<()>,
 }
 
@@ -37,6 +38,7 @@ impl Gps {
         let state_handle = state.clone();
         let (exit_tx, mut exit_rx) = tokio::sync::broadcast::channel(1);
         let (update_tx, update_rx) = tokio::sync::mpsc::unbounded_channel::<SentenceType>();
+        let (write_tx, mut write_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
 
         let _handle = tokio::task::spawn(async move {
             debug!("Spawning GPS read task");
@@ -47,13 +49,14 @@ impl Gps {
 
             loop {
                 select! {
+                    // Read from the GPS serial port
                     result = port.read_buf(&mut buff) => match result {
                         Ok(n) if n == 0 => {
                             debug!("GPS port closed");
                             break;
                         }
                         Ok(n) => {
-                            debug!("Read {} bytes from GPS", n);
+                            trace!("Read {} bytes from GPS", n);
 
                             // TODO: NMEA vs. UBX detection / parsing
                             match str::from_utf8(&buff[..n]) {
@@ -61,8 +64,8 @@ impl Gps {
                                     for l in s.lines() {
                                         match nmea_parser.parse(l) {
                                             Ok(sentence) => {
-                                                debug!("Parsed NMEA sentence: {:?}", sentence);
-                                                debug!("Current state: {:?}", nmea_parser);
+                                                trace!("Parsed NMEA sentence: {:?}", sentence);
+                                                trace!("Current state: {:?}", nmea_parser);
 
                                                 state_handle.lock().unwrap().clone_from(&nmea_parser);
 
@@ -88,6 +91,19 @@ impl Gps {
                             debug!("Error reading from GPS: {}", e);
                         }
                     },
+                    // Write to the GPS serial port
+                    Some(mut data) = write_rx.recv() => {
+                        match port.write(&mut data).await {
+                            Ok(n) => {
+                                // TODO: check n == data.len()
+                                trace!("Wrote {} bytes to GPS", n);
+                            }
+                            Err(e) => {
+                                debug!("Error writing to GPS: {}", e);
+                            }
+                        }
+                    },
+                    // Handle the exit signal
                     _e = exit_rx.recv() => {
                         debug!("Exiting GPS read task");
                         break;
@@ -102,6 +118,7 @@ impl Gps {
             exit_tx,
             state,
             update_rx,
+            write_tx,
             _handle,
         })
     }
@@ -118,6 +135,9 @@ impl Drop for Gps {
     }
 }
 
+/// [Stream] of NMEA [SentenceType] updates from the GPS device
+/// 
+/// Note: current GPS state can be fetched using the [nmea](Gps::nmea) method
 impl Stream for Gps {
     type Item = SentenceType;
 
@@ -126,5 +146,38 @@ impl Stream for Gps {
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
         self.update_rx.poll_recv(cx)
+    }
+}
+
+/// [Sink] for sending raw data to the GPS device
+impl Sink<Vec<u8>> for Gps {
+    type Error = tokio::sync::mpsc::error::SendError<Vec<u8>>;
+
+    fn poll_ready(
+        self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        std::task::Poll::Ready(Ok(()))
+    }
+
+    fn start_send(
+        self: std::pin::Pin<&mut Self>,
+        item: Vec<u8>,
+    ) -> Result<(), Self::Error> {
+        self.write_tx.send(item)
+    }
+
+    fn poll_flush(
+        self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        std::task::Poll::Ready(Ok(()))
+    }
+
+    fn poll_close(
+        self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        std::task::Poll::Ready(Ok(()))
     }
 }

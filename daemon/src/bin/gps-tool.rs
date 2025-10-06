@@ -62,9 +62,9 @@ async fn main() -> anyhow::Result<()> {
                 debug!("GPS update: {:?}", msg);
                 let state = gps.nmea().await;
 
-                match (state.latitude, state.longitude, state.altitude) {
-                    (Some(lat), Some(lon), Some(alt)) => {
-                        info!("Current fix {:?} (lat: {:.8}, lon: {:.8}, alt: {})", state.fix_type, lat, lon, alt);
+                match (state.latitude, state.longitude, state.altitude, state.fix_type) {
+                    (Some(lat), Some(lon), Some(alt), Some(fix)) => {
+                        info!("Current fix {:?} (lat: {:.8}, lon: {:.8}, alt: {})", fix, lat, lon, alt);
                     }
                     _ => {
                         warn!("Current fix {:?}", state.fix_type);
