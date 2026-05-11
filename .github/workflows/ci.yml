@@ -89,7 +89,7 @@ jobs:
       run: cargo deb --manifest-path daemon/Cargo.toml --target ${{ matrix.target }} --release --no-build
 
     - name: Upload artifacts
-      uses: actions/upload-artifact@v1
+      uses: actions/upload-artifact@v7
       with:
         name: rgpsd-${{ matrix.target }}
         path: 
