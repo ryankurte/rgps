@@ -24,11 +24,8 @@ jobs:
         toolchain: stable
         override: true
 
-    - name: Install binstall
-      uses: cargo-bins/cargo-binstall@main
-
     - name: Install nextest
-      run: cargo binstall cargo-nextest --secure
+      run: cargo install cargo-nextest --locked
 
     - name: Install deps
       run: |
@@ -70,15 +67,12 @@ jobs:
         target:  ${{ matrix.target }}
         override: true
 
-    - name: Install binstall
-      uses: cargo-bins/cargo-binstall@main
-
     - name: Install cross
       if: ${{ matrix.use_cross }}
-      run: cargo binstall cross
+      run: cargo install cross --git https://github.com/cross-rs/cross
 
     - name: Install cargo deb
-      run: cargo binstall cargo-deb
+      run: cargo install cargo-deb --locked
 
     - name: Build daemon (cross)
       if: ${{ matrix.use_cross }}
