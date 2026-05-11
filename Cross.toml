@@ -1,13 +1,18 @@
 # Add architecture-specific dependencies for cross-compilation targets
 
+[target.x86_64-unknown-linux-gnu]
+pre-build = [
+    "apt-get update && apt-get install --assume-yes libudev-dev libssl-dev openssl"
+]
+
 [target.aarch64-unknown-linux-gnu]
 pre-build = [
     "dpkg --add-architecture arm64",
-    "apt-get update && apt-get install --assume-yes libudev-dev:arm64 libssl-dev:arm64"
+    "apt-get update && apt-get install --assume-yes libudev-dev:arm64 libssl-dev:arm64 openssl:arm64"
 ]
 
 [target.armv7-unknown-linux-gnueabihf]
 pre-build = [
     "dpkg --add-architecture armhf",
-    "apt-get update && apt-get install --assume-yes libudev-dev:armhf libssl-dev:armhf"
+    "apt-get update && apt-get install --assume-yes libudev-dev:armhf libssl-dev:armhf openssl:armhf"
 ]
