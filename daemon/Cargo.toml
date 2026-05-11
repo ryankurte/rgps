@@ -59,6 +59,7 @@ ublox = { workspace = true }
 nmea = { workspace = true }
 ntrip-client = { workspace = true }
 tokio-connectors = { workspace = true }
+gpsd_proto = { workspace = true, features = [ "serialize" ] }
 
 [[bin]]
 name = "rgpsd"

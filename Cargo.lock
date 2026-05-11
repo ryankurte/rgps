@@ -808,6 +808,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "gpsd_proto"
+version = "1.0.0"
+dependencies = [
+ "log",
+ "serde",
+ "serde_derive",
+ "serde_json",
+]
+
+[[package]]
 name = "h2"
 version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2185,6 +2195,7 @@ dependencies = [
  "geoutils",
  "gnss-protos",
  "gnss-rs",
+ "gpsd_proto",
  "http",
  "hyper",
  "hyper-util",

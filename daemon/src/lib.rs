@@ -2,7 +2,7 @@
 
 use futures::{SinkExt, StreamExt};
 use geoutils::Location;
-use nmea::SentenceType;
+use nmea::{Satellite, SentenceType};
 use rtcm_rs::Message;
 use tokio::{
     sync::{broadcast::Sender as BroadcastSender, mpsc::UnboundedReceiver},
@@ -19,6 +19,8 @@ pub mod error;
 pub mod gps;
 pub mod ntrip;
 
+mod compat;
+
 use crate::{config::GpsdConfig, error::Error, gps::GpsMessage, ntrip::NtripActor};
 
 /// RGPSS actor
@@ -29,6 +31,8 @@ pub struct Gpsd {
 /// RGPSD daemon context
 struct GpsCtx {
     state: State,
+    satellites: Vec<Satellite>,
+
     gps: gps::Gps,
 
     exit_tx: BroadcastSender<()>,
@@ -94,6 +98,8 @@ impl GpsCtx {
 
         Ok(Self {
             state: State::default(),
+            satellites: vec![],
+
             gps,
 
             exit_tx,
@@ -177,49 +183,67 @@ impl GpsCtx {
     async fn handle_cmd(&mut self, cmd: Req) -> Resp {
         match cmd {
             Req::GetState => Resp::State(self.state.clone()),
+            Req::GetSatellites => Resp::Satellites(self.satellites.clone()),
         }
     }
 
     /// Handle GPS updates
     async fn handle_gps_update(&mut self, msg: GpsMessage) {
-        // TODO: do we care about any other messages here?
-        if let GpsMessage::Nmea(ref nmea, sentence_type) = msg
-            && sentence_type == SentenceType::GLL
-        {
-            trace!(
-                "NMEA update: {:?}, lat: {:?}, lng: {:?}, alt: {:?}, vdop: {:?}, hdop: {:?} pdop: {:?}",
-                nmea.fix_type,
-                nmea.latitude,
-                nmea.longitude,
-                nmea.altitude,
-                nmea.vdop,
-                nmea.hdop,
-                nmea.pdop
-            );
-
-            // Update state
-            if let Some(fix) = nmea.fix_type {
-                self.state.fix = fix;
-            }
-            self.state.altitude = nmea.altitude.map(|s| s as f64);
-            self.state.speed = nmea.speed_over_ground.map(|s| s as f64);
-            let loc = match (nmea.latitude, nmea.longitude) {
-                (Some(lat), Some(lon)) => {
-                    let loc = Location::new(lat, lon);
-                    self.state.location = Some(loc.clone());
-                    loc
-                }
-                _ => {
-                    trace!("No valid location fix");
-                    self.state.location = None;
-                    return;
-                }
-            };
-
-            // Update NTRIP actor with new location (if we've moved
-            // enough to warrant an update).
-            self.maybe_update_ntrip_location(loc).await;
+        match msg {
+            GpsMessage::Nmea(nmea, _sentence_type) => {
+                self.handle_nmea(nmea).await;
+            },
+            GpsMessage::Rtcm3(m, _) => {
+                trace!("Received RTCM message: {:?}", m);
+                return;
+            },
+            GpsMessage::Ubx(m) => {
+                trace!("Received UBX message: {:?}", m);
+                return;
+            },
         }
+    }
+
+    async fn handle_nmea(&mut self, nmea: nmea::Nmea) {
+        trace!(
+            "NMEA update: {:?}, lat: {:?}, lng: {:?}, alt: {:?}, vdop: {:?}, hdop: {:?} pdop: {:?}",
+            nmea.fix_type,
+            nmea.latitude,
+            nmea.longitude,
+            nmea.altitude,
+            nmea.vdop,
+            nmea.hdop,
+            nmea.pdop
+        );
+
+        // Update state
+        if let Some(fix) = nmea.fix_type {
+            self.state.fix = fix;
+        }
+        self.state.altitude = nmea.altitude.map(|s| s as f64);
+        self.state.speed = nmea.speed_over_ground.map(|s| s as f64);
+        let loc = match (nmea.latitude, nmea.longitude) {
+            (Some(lat), Some(lon)) => {
+                let loc = Location::new(lat, lon);
+                self.state.location = Some(loc.clone());
+                loc
+            }
+            _ => {
+                trace!("No valid location fix");
+                self.state.location = None;
+                return;
+            }
+        };
+        self.state.num_satellites = nmea.num_of_fix_satellites.unwrap_or(0) as u32;
+        self.state.dop.hdop = nmea.hdop;
+        self.state.dop.vdop = nmea.vdop;
+        self.state.dop.pdop = nmea.pdop;
+
+        self.satellites = nmea.satellites().to_vec();
+
+        // Update NTRIP actor with new location (if we've moved
+        // enough to warrant an update).
+        self.maybe_update_ntrip_location(loc).await;
     }
 
     /// Optionally update the NTRIP actor with a new location.
