@@ -1,228 +1,285 @@
-use clap::Parser;
+//! A rust-based GPS daemon with dynamic NTRIP client support.
+
 use futures::{SinkExt, StreamExt};
 use geoutils::Location;
 use nmea::SentenceType;
+use rtcm_rs::Message;
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt}, net::UnixListener, sync::{broadcast::Sender as BroadcastSender, mpsc::{Sender, UnboundedSender}}, task,
+    sync::{broadcast::Sender as BroadcastSender, mpsc::UnboundedReceiver},
+    task,
 };
-use tracing::{debug, error, info, span, trace, warn, Level};
+use tokio_connectors::{codecs::Json, unix::UnixServer};
+use tracing::{debug, error, info, level_filters::LevelFilter, trace};
+use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
-use gpsrs_proto::{Req, Resp};
+use rgps_proto::{Req, Resp, State};
 
-use crate::ntrip::{NtripClient, NtripConfig, NtripCredentials};
-
+pub mod config;
+pub mod error;
 pub mod gps;
 pub mod ntrip;
-pub mod unix;
 
-/// GPS Daemon Command Line Options
-#[derive(Clone, PartialEq, Debug, Parser)]
-pub struct Options {
-    /// GPS device serial port
-    #[clap(short='p', long, default_value = "/dev/ttyACM0", env = "GPSD_GPS_PORT")]
-    pub gps_port: String,
+use crate::{config::GpsdConfig, error::Error, gps::GpsMessage, ntrip::NtripActor};
 
-    /// GPS device baud rate
-    #[clap(short='b', long, default_value = "115200", env = "GPSD_GPS_BAUD")]
-    pub gps_baud: u32,
-
-    /// Daemon control socket
-    #[clap(long, default_value = ".gpsd.sock", env = "GPSD_CTL_SOCK")]
-    pub ctl_sock: String,
-
-    // NTRIP options
-    #[clap(long, default_value = "posau", env = "NTRIP_HOST")]
-    pub ntrip_host: NtripConfig,
-
-    // NTRIP credentials
-    #[clap(flatten)]
-    pub ntrip_creds: NtripCredentials,
+/// RGPSS actor
+pub struct Gpsd {
+    _ctl_task_handle: task::JoinHandle<Result<(), Error>>,
 }
 
-/// GPS Daemon Context
-pub struct Gpsd {
-    ctl_task_handle: task::JoinHandle<Result<(), anyhow::Error>>,
+/// RGPSD daemon context
+struct GpsCtx {
+    state: State,
+    gps: gps::Gps,
+
+    exit_tx: BroadcastSender<()>,
+    unix_server: UnixServer<Json, Resp, Req>,
+
+    ntrip_handle: Option<NtripActor>,
+    ntrip_rx: UnboundedReceiver<(Message, Vec<u8>)>,
+
+    last_mount_location: Option<Location>,
 }
 
 impl Gpsd {
-    pub async fn new(opts: Options, exit: BroadcastSender<()>) -> Result<Self, anyhow::Error> {
-        // Setup unix listening socket
+    /// Spawn the GPSD main task, connecting to the GPS, NTRIP service, and binding sockets
+    /// as necessary.
+    pub async fn spawn(opts: GpsdConfig, exit: BroadcastSender<()>) -> Result<Self, Error> {
+        // Create GPSD context
+        let gpsd_ctx = GpsCtx::new(opts, exit.clone()).await?;
 
-        // Clear the open file if it exists
-        let _ = std::fs::remove_file(&opts.ctl_sock);
+        // Spawn a task to run the GPSD main loop
+        let ctl_task_handle = task::spawn(async move {
+            match gpsd_ctx.run().await {
+                Ok(_) => {
+                    debug!("GPSD main loop exited successfully");
+                    Ok(())
+                }
+                Err(e) => {
+                    error!("GPSD main loop exited with error: {}", e);
+                    Err(e)
+                }
+            }
+        });
+
+        Ok(Self {
+            _ctl_task_handle: ctl_task_handle,
+        })
+    }
+}
+
+impl GpsCtx {
+    /// Create a new GPSD context, connecting to the GPS and binding any necessary sockets
+    pub async fn new(opts: GpsdConfig, exit_tx: BroadcastSender<()>) -> Result<Self, Error> {
+        // Connect to GPS device
+        info!(
+            "Connecting to GPS on port {} at {} baud",
+            opts.gps.gps_port.as_path().display(),
+            opts.gps.gps_baud
+        );
+        let gps = gps::Gps::connect(&opts.gps.gps_port, opts.gps.gps_baud).await?;
 
         // Bind the unix socket listener
-        let ctl_listener = UnixListener::bind(&opts.ctl_sock)?;
-        let (rx_sink, mut rx_stream) = tokio::sync::mpsc::unbounded_channel();
-
-        // Connect to GPS device
-        info!("Connecting to GPS on port {} at {} baud", opts.gps_port, opts.gps_baud);
-        let mut gps = gps::Gps::connect(&opts.gps_port, opts.gps_baud).await?;
+        let unix_server: UnixServer<Json, Resp, Req> =
+            UnixServer::bind(&opts.general.ctl_sock).await?;
 
         // Connect to NTRIP server
-        let mut ntrip_client = NtripClient::new(opts.ntrip_host, opts.ntrip_creds).await?;
+        let (ntrip_tx, ntrip_rx) = tokio::sync::mpsc::unbounded_channel();
+        let ntrip_handle = if let Some(ntrip_opts) = opts.ntrip.as_ref() {
+            info!("NTRIP configuration found, connecting to NTRIP server...");
+            Some(NtripActor::spawn(ntrip_opts.clone(), ntrip_tx).await?)
+        } else {
+            info!("No NTRIP configuration found, skipping NTRIP connection");
+            None
+        };
 
-        // Find the nearest mount point
-        // TODO: dynamically add / remove / update based on GPS location
-        let mounts = ntrip_client.list_mounts().await?;
-        let nearest = mounts.find_nearest(&Location::new(-36.792229246066135, 174.77309828570796));
-        info!("Nearest mount point: {:?}", nearest);
+        Ok(Self {
+            state: State::default(),
+            gps,
 
-        let mut mount = match nearest {
-            Some((m, d)) if d < 50_000.0 => {
-                info!("Using mount point {} at distance {:.2} meters", m.name, d);
-                
-                let h = ntrip_client.mount(&m.name, exit.clone()).await?;
+            exit_tx,
+            unix_server,
 
-                h
-            },
-            _ => {   
-                error!("No mount points found");
-                return Err(anyhow::anyhow!("No mount points found"));
+            ntrip_handle,
+            ntrip_rx,
+            last_mount_location: None,
+        })
+    }
+
+    pub async fn run(mut self) -> Result<(), Error> {
+        let mut e = self.exit_tx.subscribe();
+
+        // Interval timer for periodically logging GPS state
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
+
+        loop {
+            tokio::select! {
+                // Handle incoming control requests on the unix socket
+                req = self.unix_server.next() => match req {
+                    Some((req, req_id)) => {
+                        debug!("Received request: {:?}", req);
+
+                        // Handle the request
+                        let res = self.handle_cmd(req).await;
+
+                        // Forward the response
+                        if let Err(e) = self.unix_server.send(res, req_id).await {
+                            error!("Failed to forward response: {}", e);
+                        }
+                    },
+                    None => {
+                        // Channel closed
+                        break;
+                    }
+                },
+
+                // Handle GPS updates
+                gps_update = self.gps.next() => match gps_update {
+                    Some(msg) => {
+                        trace!("Received GPS message: {:?}", msg);
+                        self.handle_gps_update(msg).await;
+                    },
+                    None => {
+                        // GPS stream closed
+                        break;
+                    }
+                },
+
+                // Handle NTRIP messages
+                Some((msg, data)) = self.ntrip_rx.recv() => {
+                    trace!("Received NTRIP message: {:?}, {} bytes", msg, data.len());
+                    // Forward the RTCM data to the GPS device
+                    if let Err(e) = self.gps.send(data).await {
+                        error!("Failed to write RTCM data to GPS: {}", e);
+                    }
+                },
+
+                // Perform periodic updates / logging
+                _ = interval.tick() => {
+                    info!("GPS {}", self.state);
+
+                    // TODO: if we have an NTRIP connection but haven't seen an NTRIP
+                    // message in a little bit we should force a re-connection.
+
+                },
+
+                // Handle exit signal
+                _ = e.recv() => {
+                    debug!("Received exit signal");
+                    break;
+                },
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handle an incoming control command and produce a response
+    async fn handle_cmd(&mut self, cmd: Req) -> Resp {
+        match cmd {
+            Req::GetState => Resp::State(self.state.clone()),
+        }
+    }
+
+    /// Handle GPS updates
+    async fn handle_gps_update(&mut self, msg: GpsMessage) {
+        // TODO: do we care about any other messages here?
+        if let GpsMessage::Nmea(ref nmea, sentence_type) = msg
+            && sentence_type == SentenceType::GLL
+        {
+            trace!(
+                "NMEA update: {:?}, lat: {:?}, lng: {:?}, alt: {:?}, vdop: {:?}, hdop: {:?} pdop: {:?}",
+                nmea.fix_type,
+                nmea.latitude,
+                nmea.longitude,
+                nmea.altitude,
+                nmea.vdop,
+                nmea.hdop,
+                nmea.pdop
+            );
+
+            // Update state
+            if let Some(fix) = nmea.fix_type {
+                self.state.fix = fix;
+            }
+            self.state.altitude = nmea.altitude.map(|s| s as f64);
+            self.state.speed = nmea.speed_over_ground.map(|s| s as f64);
+            let loc = match (nmea.latitude, nmea.longitude) {
+                (Some(lat), Some(lon)) => {
+                    let loc = Location::new(lat, lon);
+                    self.state.location = Some(loc.clone());
+                    loc
+                }
+                _ => {
+                    trace!("No valid location fix");
+                    self.state.location = None;
+                    return;
+                }
+            };
+
+            // Update NTRIP actor with new location (if we've moved
+            // enough to warrant an update).
+            self.maybe_update_ntrip_location(loc).await;
+        }
+    }
+
+    /// Optionally update the NTRIP actor with a new location.
+    ///
+    /// Only updates if we have an active NTRIP connection and we've moved some
+    /// distance since the last update.
+    async fn maybe_update_ntrip_location(&mut self, loc: Location) {
+        // Check we have an NTRIP connection before trying to update it
+        let ntrip_handle = match self.ntrip_handle.as_ref() {
+            Some(handle) => handle,
+            None => return, // No NTRIP connection, skip
+        };
+
+        // Only update the NTRIP location if we've moved a
+        // significant distance since last update.
+        match self
+            .last_mount_location
+            .map(|last_loc| loc.distance_to(&last_loc).ok())
+            .flatten()
+        {
+            Some(d) if d.meters() < 1000.0 => return,
+            Some(d) => {
+                debug!(
+                    "Device moved {} m since last NTRIP update, updating location...",
+                    d
+                );
+            }
+            None => {
+                debug!("No previous NTRIP location, updating with current location...");
             }
         };
 
-        // Create listening task
-        let exit = exit.clone();
-        let ctl_task_handle = task::spawn(async move {
-            let mut index = 0u32;
-            let mut e = exit.subscribe();
-
-            loop {
-                tokio::select! {
-                    // Handle new unix socket connections
-                    c = ctl_listener.accept() => match c {
-                        Ok((stream, addr)) => {
-                            println!("new client {addr:?}!");
-
-                            Self::handle_new_client(index, stream, exit.clone(), rx_sink.clone());
-                            index += 1;
-                            
-                        }
-                        Err(e) => {
-                            error!("Failed to accept connection: {e:?}");
-                        }
-                    },
-
-                    // Handle incoming requests from clients
-                    req = rx_stream.recv() => match req {
-                        Some((req, resp_tx)) => {
-                            println!("Received request: {:?}", req);
-                            // Handle the request
-
-                            if let Err(e) = resp_tx.send(Resp::Pong){
-                                warn!("Failed to send response: {e}");
-                            }
-                        },
-                        None => {
-                            // Channel closed
-                            break;
-                        }
-                    },
-
-                    // Handle GPS updates
-                    gps_update = gps.next() => match gps_update {
-                        Some(msg) => {
-                            trace!("GPS update: {:?}", msg);
-
-                            if msg == SentenceType::GLL {
-                                let state = gps.nmea().await;
-
-                                debug!("Current state: {:?}, lat: {:?}, lng: {:?}, alt: {:?}, vdop: {:?}, hdop: {:?} pdop: {:?}", state.fix_type, state.latitude, state.longitude, state.altitude, state.vdop, state.hdop, state.pdop);
-                            }
-                        },
-                        None => {
-                            // GPS stream closed
-                            break;
-                        }
-                    },
-
-                    // Poll for NTRIP messages
-                    ntrip_msg = mount.next() => match ntrip_msg {
-                        Some((msg, raw)) => {
-                            trace!("NTRIP message {:?}", msg.number());
-
-                            // Forward to GPS
-                            gps.send(raw).await?;
-                        },
-                        None => {
-                            warn!("NTRIP stream closed");
-                            break;
-                        }
-                    },
-
-                    // Handle exit signal
-                    _ = e.recv() => {
-                        println!("Received exit signal");
-                        break;
-                    },
-                }
+        // Update NTRIP actor with new location
+        match ntrip_handle.update_location(loc.clone()).await {
+            Ok(Some(m)) => {
+                info!("Updated NTRIP mountpoint to {}", m.name);
+                self.last_mount_location = Some(loc);
+                self.state.mount = Some(m.name);
             }
-
-            Ok(())
-        });
-
-        Ok(Self { ctl_task_handle })
-    }
-
-    fn handle_new_client(index: u32, mut stream: tokio::net::UnixStream, exit: BroadcastSender<()>, rx_sink: UnboundedSender<(Req, UnboundedSender<Resp>)>) {
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Resp>();
-        let mut e = exit.subscribe();
-
-        // Spawn a handler task for this unix stream
-        task::spawn(async move {
-            let (mut unix_rx, mut unix_tx) = stream.split();
-            let mut rx_buff = [0u8; 1024];
-
-            loop {
-                tokio::select! {
-                    // Handle incoming requests from the client
-                    req = unix_rx.read(&mut rx_buff) => match req {
-                        Ok(n) => {
-                            // Process the request
-                            let s = std::str::from_utf8(&rx_buff[..n]).unwrap();
-                            println!("Received request: {s}");
-                            let r = serde_json::from_str::<Req>(s).unwrap();
-
-                            // Forward to request handling
-                            rx_sink.send((r, tx.clone())).unwrap();
-                        }
-                        Err(e) => {
-                            // Channel closed
-                            trace!("Client {index} disconnected: {e}");
-                            break;
-                        }
-                    },
-                    // Handle outgoing responses for this client
-                    resp = rx.recv() => match resp {
-                        Some(resp) => {
-                            // Encode to JSON
-                            let s = match serde_json::to_string(&resp) {
-                                Ok(s) => s,
-                                Err(e) => {
-                                    error!("Failed to serialize response: {e}");
-                                    continue;
-                                }
-                            };
-                            // Write to the unix socket
-                            if let Err(e) = unix_tx.write_all(s.as_bytes()).await {
-                                error!("Failed to send response to client {index}: {e}");
-                            }
-                        }
-                        None => {
-                            // Channel closed
-                            break;
-                        }
-                    },
-
-                    // Handle exit signal
-                    _ = e.recv() => {
-                        println!("Received exit signal");
-                        break;
-                    }
-                }
+            Ok(None) => {
+                debug!("No closer NTRIP mountpoint found");
             }
-        });
-
+            Err(e) => {
+                error!("Failed to update NTRIP location: {}", e);
+            }
+        }
     }
+}
+
+/// Helper to set up logging with the provided level filter
+pub fn setup_logging(log_level: LevelFilter) {
+    let filter = EnvFilter::from_default_env()
+        .add_directive("hyper_util=WARN".parse().unwrap())
+        .add_directive("reqwest=WARN".parse().unwrap())
+        .add_directive("rustls=WARN".parse().unwrap())
+        .add_directive(log_level.into());
+    let _ = FmtSubscriber::builder()
+        .compact()
+        .without_time()
+        .with_max_level(log_level)
+        .with_env_filter(filter)
+        .try_init();
 }

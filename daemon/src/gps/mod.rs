@@ -1,17 +1,26 @@
-use std::sync::{Arc, Mutex};
+use std::{
+    path::Path,
+    sync::{Arc, Mutex},
+};
 
 use futures::{Sink, Stream};
-use geoutils::Location;
 use nmea::{Nmea, SentenceType};
-use tokio::{io::{AsyncReadExt, AsyncWriteExt}, select};
-use tokio_serial::{SerialPortBuilder, SerialPortBuilderExt as _, SerialStream};
-use tracing::{debug, trace};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    select,
+    sync::mpsc::{UnboundedReceiver, UnboundedSender},
+};
+use tokio_serial::SerialPortBuilderExt as _;
+use tracing::{debug, error, trace};
+
+mod parser;
+use parser::GpsAccumulator;
 
 pub struct Gps {
     exit_tx: tokio::sync::broadcast::Sender<()>,
     state: Arc<Mutex<Nmea>>,
-    update_rx: tokio::sync::mpsc::UnboundedReceiver<SentenceType>,
-    write_tx: tokio::sync::mpsc::UnboundedSender<Vec<u8>>,
+    update_rx: UnboundedReceiver<GpsMessage>,
+    write_tx: UnboundedSender<Vec<u8>>,
     _handle: tokio::task::JoinHandle<()>,
 }
 
@@ -23,11 +32,28 @@ pub enum GpsError {
     SerialPortError(#[from] tokio_serial::Error),
 }
 
-impl Gps {
-    pub async fn connect(port: &str, baud_rate: u32) -> Result<Self, GpsError> {
-        debug!("Connecting to GPS on port {port} at {baud_rate} baud");
+/// Messages received from the GPS
+#[derive(Debug)]
+pub enum GpsMessage {
+    /// NMEA object with the type of sentence that was parsed (e.g. GGA, RMC, etc.)
+    // TODO: rework / write a new NMEA parser that uses an enum?
+    Nmea(Nmea, SentenceType),
+    /// Parsed RTCM3 messages along with the raw byte representation for RTK forwarding etc.
+    Rtcm3(rtcm_rs::Message, Vec<u8>),
+    /// Raw UBX messages (not yet parsed, just forwarded as bytes)
+    Ubx(Vec<u8>),
+}
 
-        let mut port = tokio_serial::new(port, baud_rate)
+impl Gps {
+    /// Connect to a GPS device on the specified serial port and baud rate
+    pub async fn connect(port: &Path, baud_rate: u32) -> Result<Self, GpsError> {
+        debug!(
+            "Connecting to GPS on port {} at {} baud",
+            port.display(),
+            baud_rate
+        );
+
+        let mut port = tokio_serial::new(port.as_os_str().to_str().unwrap(), baud_rate)
             .open_native_async()
             .map_err(GpsError::SerialPortError)?;
 
@@ -37,17 +63,17 @@ impl Gps {
 
         let state_handle = state.clone();
         let (exit_tx, mut exit_rx) = tokio::sync::broadcast::channel(1);
-        let (update_tx, update_rx) = tokio::sync::mpsc::unbounded_channel::<SentenceType>();
+        let (update_tx, update_rx) = tokio::sync::mpsc::unbounded_channel::<GpsMessage>();
         let (write_tx, mut write_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
 
         let _handle = tokio::task::spawn(async move {
             debug!("Spawning GPS read task");
 
-            let mut buff = Vec::with_capacity(1024);
-            let mut nmea_parser = Nmea::default();
-            let mut ublox_parser = ublox::Parser::default();
+            let mut accumulator = GpsAccumulator::new();
 
-            loop {
+            let mut buff: Vec<u8> = Vec::with_capacity(1024);
+
+            'gps: loop {
                 select! {
                     // Read from the GPS serial port
                     result = port.read_buf(&mut buff) => match result {
@@ -56,36 +82,27 @@ impl Gps {
                             break;
                         }
                         Ok(n) => {
-                            trace!("Read {} bytes from GPS", n);
+                            trace!("Read {} bytes from GPS: {:02x?}", n, &buff[..n]);
 
-                            // TODO: NMEA vs. UBX detection / parsing
-                            match str::from_utf8(&buff[..n]) {
-                                Ok(s) => {
-                                    for l in s.lines() {
-                                        match nmea_parser.parse(l) {
-                                            Ok(sentence) => {
-                                                trace!("Parsed NMEA sentence: {:?}", sentence);
-                                                trace!("Current state: {:?}", nmea_parser);
+                            // Add to accumulator
+                            accumulator.push(&buff[..n]);
 
-                                                state_handle.lock().unwrap().clone_from(&nmea_parser);
-
-                                                update_tx.send(sentence).unwrap();
-                                            }
-                                            Err(e) => {
-                                                debug!("Failed to parse NMEA sentence: {}", e);
-                                            }
-                                        }
-                                    }
+                            // Look for complete NMEA, RTCM, or UBX messages
+                            while let Some(message) = accumulator.next_message() {
+                                // Update internal NMEA state if it's an NMEA message
+                                if let GpsMessage::Nmea(ref nmea, _) = message {
+                                    let mut state = state_handle.lock().unwrap();
+                                    *state = nmea.clone();
                                 }
-                                Err(_) => {
-                                    let mut parsed = ublox_parser.consume_ubx(&buff[..n]);
-                                    while let Some(m) = parsed.next() {
-                                        debug!("Parsed UBX message: {:?}", m);
-                                    }
+
+                                // Send the parsed message to the main task
+                                if let Err(e) = update_tx.send(message) {
+                                    error!("Failed to send GPS update: {}", e);
+                                    break 'gps;
                                 }
                             }
 
-                            buff.drain(..n);
+                            buff.clear();
                         }
                         Err(e) => {
                             debug!("Error reading from GPS: {}", e);
@@ -135,11 +152,11 @@ impl Drop for Gps {
     }
 }
 
-/// [Stream] of NMEA [SentenceType] updates from the GPS device
-/// 
+/// [Stream] of [GpsMessage] updates from the GPS device
+///
 /// Note: current GPS state can be fetched using the [nmea](Gps::nmea) method
 impl Stream for Gps {
-    type Item = SentenceType;
+    type Item = GpsMessage;
 
     fn poll_next(
         mut self: std::pin::Pin<&mut Self>,
@@ -149,7 +166,7 @@ impl Stream for Gps {
     }
 }
 
-/// [Sink] for sending raw data to the GPS device
+/// [Sink] for sending raw data / control messages to the GPS device
 impl Sink<Vec<u8>> for Gps {
     type Error = tokio::sync::mpsc::error::SendError<Vec<u8>>;
 
@@ -160,10 +177,7 @@ impl Sink<Vec<u8>> for Gps {
         std::task::Poll::Ready(Ok(()))
     }
 
-    fn start_send(
-        self: std::pin::Pin<&mut Self>,
-        item: Vec<u8>,
-    ) -> Result<(), Self::Error> {
+    fn start_send(self: std::pin::Pin<&mut Self>, item: Vec<u8>) -> Result<(), Self::Error> {
         self.write_tx.send(item)
     }
 

@@ -1,0 +1,21 @@
+# Base (example) rgpsd configuration file.
+
+# General daemon configuration
+[general]
+# Path to the control socket for client communication
+ctl_sock = "/tmp/rgpsd.sock"
+
+# GPS configuration
+[gps]
+# Serial port for GPS device
+gps_port = "/dev/ttyACM0"
+# Baud rate for GPS device
+gps_baud = 115200
+
+# NTRIP correction service configuration
+[ntrip]
+host = "rtk2go.com"
+port = 2101
+use_tls = false
+user = ""
+pass = ""
