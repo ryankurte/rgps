@@ -16,7 +16,8 @@ assets = [
 maintainer-scripts = "scripts/"
 systemd-units = { enable = false, unit-name = "rgpsd" }
 depends = [
-    "libssl"
+    "libssl",
+    "libudev",
 ]
 
 [dependencies]

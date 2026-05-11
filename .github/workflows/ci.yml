@@ -30,6 +30,11 @@ jobs:
     - name: Install nextest
       run: cargo binstall cargo-nextest --secure
 
+    - name: Install deps
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libudev-dev libssl-dev
+        
     - name: Run tests
       run: cargo nextest run --workspace --all-features
 
@@ -69,15 +74,19 @@ jobs:
       uses: cargo-bins/cargo-binstall@main
 
     - name: Install cross
-      if: ${{ matrix.use_cross == 'true' }}
+      if: ${{ matrix.use_cross }}
       run: cargo binstall cross
 
     - name: Install cargo deb
       run: cargo binstall cargo-deb
 
-    - name: Build daemon
-      if: ${{ matrix.use_cross == 'false' }}
+    - name: Build daemon (cross)
+      if: ${{ matrix.use_cross }}
       run: cross build --manifest-path daemon/Cargo.toml --target ${{ matrix.target }} --release
+
+    - name: Build daemon (native)
+      if: ${{ !matrix.use_cross }}
+      run: cargo build --manifest-path daemon/Cargo.toml --target ${{ matrix.target }} --release
 
     - name: Copy and archive binary
       run: |
