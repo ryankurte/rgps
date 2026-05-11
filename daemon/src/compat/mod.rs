@@ -4,6 +4,8 @@
 //! allowing existing GPSD clients to connect and receive GPS state updates and
 //! satellite information from rgpsd.
 //! 
+
+#![allow(dead_code, unused)]
 use std::fmt::Display;
 
 use futures::StreamExt;

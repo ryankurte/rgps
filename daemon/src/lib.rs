@@ -2,7 +2,7 @@
 
 use futures::{SinkExt, StreamExt};
 use geoutils::Location;
-use nmea::{Satellite, SentenceType};
+use nmea::{Satellite};
 use rtcm_rs::Message;
 use tokio::{
     sync::{broadcast::Sender as BroadcastSender, mpsc::UnboundedReceiver},
