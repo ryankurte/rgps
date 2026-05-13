@@ -2997,9 +2997,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-connectors"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "401900ae06eccf6416422f3e39c93f272c609ba13d297ab866d7903901870b8e"
+checksum = "0046dd63c8d597790df4ef7b7a849f307edcfe229f3040d3b9ab279f7809a535"
 dependencies = [
  "futures",
  "postcard",

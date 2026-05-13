@@ -8,9 +8,14 @@ use tokio::{
     sync::{broadcast::Sender as BroadcastSender, mpsc::UnboundedReceiver},
     task,
 };
-use tokio_connectors::{codecs::Json, unix::UnixServer};
 use tracing::{debug, error, info, level_filters::LevelFilter, trace};
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
+
+use tokio_connectors::codecs::Json;
+#[cfg(target_family = "unix")]
+use tokio_connectors::unix::UnixServer;
+#[cfg(not(target_family = "unix"))]
+use tokio_connectors::tcp::TcpServer;
 
 use rgps::{Req, Resp, State};
 
@@ -38,7 +43,11 @@ struct GpsCtx {
     exit_tx: BroadcastSender<()>,
 
     #[cfg(target_family = "unix")]
-    unix_server: UnixServer<Json, Resp, Req>,
+    ctl_server: UnixServer<Json, Resp, Req>,
+
+    #[cfg(not(target_family = "unix"))]
+    ctl_server: TcpServer<Json, Resp, Req>,
+
 
     ntrip_handle: Option<NtripActor>,
     ntrip_rx: UnboundedReceiver<(Message, Vec<u8>)>,
@@ -84,10 +93,14 @@ impl GpsCtx {
         );
         let gps = gps::Gps::connect(&opts.gps.gps_port, opts.gps.gps_baud).await?;
 
-        // Bind the unix socket listener
+        // Bind the control server socket (TCP or UNIX depending on platform)
         #[cfg(target_family = "unix")]
-        let unix_server: UnixServer<Json, Resp, Req> =
+        let ctl_server: UnixServer<Json, Resp, Req> =
             UnixServer::bind(&opts.general.ctl_sock).await?;
+
+        #[cfg(not(target_family = "unix"))]
+        let ctl_server: TcpServer<Json, Resp, Req> =
+            TcpServer::bind(&opts.general.ctl_sock).await?;
 
         // Connect to NTRIP server
         let (ntrip_tx, ntrip_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -107,8 +120,7 @@ impl GpsCtx {
 
             exit_tx,
 
-            #[cfg(target_family = "unix")]
-            unix_server,
+            ctl_server,
 
             ntrip_handle,
             ntrip_rx,
@@ -124,36 +136,23 @@ impl GpsCtx {
 
         loop {
             tokio::select! {
-                // Handle incoming control requests on the unix socket
-                #[cfg(target_family = "unix")]
-                req = self.unix_server.next() => match req {
-                    Some((req, req_id)) => {
-                        debug!("Received request: {:?}", req);
+                // Handle incoming control requests on the control socket
+                Some((req, req_id)) = self.ctl_server.next() => {
+                    debug!("Received request: {:?}", req);
 
-                        // Handle the request
-                        let res = self.handle_cmd(req).await;
+                    // Handle the request
+                    let res = self.handle_cmd(req).await;
 
-                        // Forward the response
-                        if let Err(e) = self.unix_server.send(res, req_id).await {
-                            error!("Failed to forward response: {}", e);
-                        }
-                    },
-                    None => {
-                        // Channel closed
-                        break;
+                    // Forward the response
+                    if let Err(e) = self.ctl_server.send(res, req_id).await {
+                        error!("Failed to forward response: {}", e);
                     }
                 },
 
                 // Handle GPS updates
-                gps_update = self.gps.next() => match gps_update {
-                    Some(msg) => {
-                        trace!("Received GPS message: {:?}", msg);
-                        self.handle_gps_update(msg).await;
-                    },
-                    None => {
-                        // GPS stream closed
-                        break;
-                    }
+                Some(msg) = self.gps.next() => {
+                    trace!("Received GPS message: {:?}", msg);
+                    self.handle_gps_update(msg).await;
                 },
 
                 // Handle NTRIP messages
@@ -174,11 +173,15 @@ impl GpsCtx {
 
                 },
 
-                // Handle exit signal
+                // Handle exit signal or streams closed
                 _ = e.recv() => {
                     debug!("Received exit signal");
                     break;
                 },
+                else => {
+                    debug!("Stream(s) closed, exiting");
+                    break;
+                }
             }
         }
 

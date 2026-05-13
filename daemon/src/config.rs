@@ -2,6 +2,9 @@
 
 use std::path::{Path, PathBuf};
 
+#[cfg(not(target_family = "unix"))]
+use std::net::SocketAddr;
+
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 
@@ -43,8 +46,13 @@ impl GpsdConfig {
 #[derive(Clone, PartialEq, Debug, Parser, Serialize, Deserialize)]
 pub struct General {
     /// Daemon control socket
+    #[cfg(target_family = "unix")]
     #[clap(long, default_value = default_sock_path().into_os_string(), env = "RGPSD_CTL_SOCK")]
     pub ctl_sock: PathBuf,
+
+    #[cfg(not(target_family = "unix"))]
+    #[clap(long, default_value = "127.0.0.1:8080", env = "RGPSD_CTL_SOCK")]
+    pub ctl_sock: SocketAddr,
 }
 
 /// Load the default socket path depending on whether were running as a user
