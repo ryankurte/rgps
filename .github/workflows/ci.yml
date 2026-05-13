@@ -99,10 +99,12 @@ jobs:
       if: ${{ !matrix.use_cross }}
       run: cargo build --manifest-path daemon/Cargo.toml --target ${{ matrix.target }} --release
 
-    - name: Copy and archive binary
+    - name: Copy out the binary
       run: |
-        cp target/${{ matrix.target }}/release/rgpsd rgpsd-${{ matrix.target }}${{ matrix.os == 'windows-latest' && '.exe' || '' }}
-        tar -czvf rgpsd-${{ matrix.target }}.tgz rgpsd-${{ matrix.target }}${{ matrix.os == 'windows-latest' && '.exe' || '' }}
+        cp target/${{ matrix.target }}/release/rgpsd${{ matrix.os == 'windows-latest' && '.exe' || '' }} .
+    
+    - name: Archive the binary
+      run: tar -czvf rgpsd-${{ matrix.target }}.tgz rgpsd${{ matrix.os == 'windows-latest' && '.exe' || '' }} 
 
     - name: Generate SBOM
       run: cargo-sbom --output-format=cyclone_dx_json_1_4 > rgps.json
@@ -122,7 +124,7 @@ jobs:
       uses: actions/upload-artifact@v7
       with:
         name: rgpsd-${{ matrix.target }}
-        path: 
+        path: |
             rgpsd-*.deb
             rgpsd-${{ matrix.target }}.tgz
 
