@@ -1,10 +1,8 @@
-
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Deserializer;
 use strum::{Display, EnumString};
-
 
 /// Arguments for the ?WATCH command.
 ///
@@ -157,7 +155,8 @@ impl GpsdCommand {
         }
 
         // The command name ends with either `;` or `=`, so look for the first occurrence of either.
-        let name_end_pos = s.find(|c| c == ';' || c == '=')
+        let name_end_pos = s
+            .find(|c| c == ';' || c == '=')
             .ok_or(ParseCommandError::InvalidFormat)?;
 
         // Grab the command name and convert to uppercase
@@ -179,22 +178,36 @@ impl GpsdCommand {
             // JSON args, use a streaming parser to find the end of the JSON object.
             match name.as_str() {
                 "WATCH" => {
-                    let decoder = &mut Deserializer::from_str(&s[name_end_pos + 1..]).into_iter::<WatchArgs>();
-                    let args = decoder.next()
+                    let decoder = &mut Deserializer::from_str(&s[name_end_pos + 1..])
+                        .into_iter::<WatchArgs>();
+                    let args = decoder
+                        .next()
                         .transpose()
                         .map_err(|e| ParseCommandError::InvalidArgs(e.to_string()))?
-                        .ok_or_else(|| ParseCommandError::InvalidArgs("missing JSON value".to_string()))?;
-                    Ok((GpsdCommand::Watch(Some(args)), decoder.byte_offset() + name_end_pos + 1))
-                },
+                        .ok_or_else(|| {
+                            ParseCommandError::InvalidArgs("missing JSON value".to_string())
+                        })?;
+                    Ok((
+                        GpsdCommand::Watch(Some(args)),
+                        decoder.byte_offset() + name_end_pos + 1,
+                    ))
+                }
                 "DEVICE" => {
-                    let decoder = &mut Deserializer::from_str(&s[name_end_pos + 1..]).into_iter::<DeviceArgs>();
-                    let args = decoder.next()
+                    let decoder = &mut Deserializer::from_str(&s[name_end_pos + 1..])
+                        .into_iter::<DeviceArgs>();
+                    let args = decoder
+                        .next()
                         .transpose()
                         .map_err(|e| ParseCommandError::InvalidArgs(e.to_string()))?
-                        .ok_or_else(|| ParseCommandError::InvalidArgs("missing JSON value".to_string()))?;
-                    Ok((GpsdCommand::Device(Some(args)), decoder.byte_offset() + name_end_pos + 1))
-                },
-                other => return Err(ParseCommandError::UnknownCommand(other.to_string()))
+                        .ok_or_else(|| {
+                            ParseCommandError::InvalidArgs("missing JSON value".to_string())
+                        })?;
+                    Ok((
+                        GpsdCommand::Device(Some(args)),
+                        decoder.byte_offset() + name_end_pos + 1,
+                    ))
+                }
+                other => return Err(ParseCommandError::UnknownCommand(other.to_string())),
             }
         }
     }
@@ -270,18 +283,27 @@ mod tests {
             // Error cases
             ("VERSION;", Err(ParseCommandError::InvalidFormat)),
             ("?VERSION", Err(ParseCommandError::InvalidFormat)),
-            ("?FOO;", Err(ParseCommandError::UnknownCommand("FOO".to_string()))),
-            ("?WATCH={bad json};", Err(ParseCommandError::InvalidArgs(
-                // Only check the variant, not the exact serde message — see assert below
-                "".to_string(),
-            ))),
+            (
+                "?FOO;",
+                Err(ParseCommandError::UnknownCommand("FOO".to_string())),
+            ),
+            (
+                "?WATCH={bad json};",
+                Err(ParseCommandError::InvalidArgs(
+                    // Only check the variant, not the exact serde message — see assert below
+                    "".to_string(),
+                )),
+            ),
         ];
 
         for (input, expected) in test {
             let parsed = GpsdCommand::from_str(input);
             // For InvalidArgs we only check the variant, not the serde message string.
             match (parsed, expected) {
-                (Err(ParseCommandError::InvalidArgs(_)), Err(ParseCommandError::InvalidArgs(_))) => {}
+                (
+                    Err(ParseCommandError::InvalidArgs(_)),
+                    Err(ParseCommandError::InvalidArgs(_)),
+                ) => {}
                 (parsed, expected) => {
                     assert_eq!(&parsed, expected, "parsing command: {input}");
                 }

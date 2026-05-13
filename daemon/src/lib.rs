@@ -2,7 +2,7 @@
 
 use futures::{SinkExt, StreamExt};
 use geoutils::Location;
-use nmea::{Satellite};
+use nmea::Satellite;
 use rtcm_rs::Message;
 use tokio::{
     sync::{broadcast::Sender as BroadcastSender, mpsc::UnboundedReceiver},
@@ -36,6 +36,8 @@ struct GpsCtx {
     gps: gps::Gps,
 
     exit_tx: BroadcastSender<()>,
+
+    #[cfg(target_family = "unix")]
     unix_server: UnixServer<Json, Resp, Req>,
 
     ntrip_handle: Option<NtripActor>,
@@ -83,6 +85,7 @@ impl GpsCtx {
         let gps = gps::Gps::connect(&opts.gps.gps_port, opts.gps.gps_baud).await?;
 
         // Bind the unix socket listener
+        #[cfg(target_family = "unix")]
         let unix_server: UnixServer<Json, Resp, Req> =
             UnixServer::bind(&opts.general.ctl_sock).await?;
 
@@ -103,6 +106,8 @@ impl GpsCtx {
             gps,
 
             exit_tx,
+
+            #[cfg(target_family = "unix")]
             unix_server,
 
             ntrip_handle,
@@ -120,6 +125,7 @@ impl GpsCtx {
         loop {
             tokio::select! {
                 // Handle incoming control requests on the unix socket
+                #[cfg(target_family = "unix")]
                 req = self.unix_server.next() => match req {
                     Some((req, req_id)) => {
                         debug!("Received request: {:?}", req);
@@ -192,15 +198,15 @@ impl GpsCtx {
         match msg {
             GpsMessage::Nmea(nmea, _sentence_type) => {
                 self.handle_nmea(nmea).await;
-            },
+            }
             GpsMessage::Rtcm3(m, _) => {
                 trace!("Received RTCM message: {:?}", m);
                 return;
-            },
+            }
             GpsMessage::Ubx(m) => {
                 trace!("Received UBX message: {:?}", m);
                 return;
-            },
+            }
         }
     }
 

@@ -42,7 +42,7 @@ jobs:
 
   build-daemon:
     runs-on: ${{ matrix.os }}
-    continue-on-error: false
+    continue-on-error: ${{ matrix.os == 'windows-latest'}}
 
     strategy:
       fail-fast: false

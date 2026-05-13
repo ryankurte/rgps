@@ -44,7 +44,7 @@ gnss-protos = { version = "0.0.2", features = ["gps"] }
 ublox = { version = "0.6.0", default-features = false, features = ["std", "sfrbx-gps", "ubx_proto23"] }
 nmea = { version = "0.7.0", features = ["serde"] }
 ntrip-client = "0.1.0"
-tokio-connectors = "0.1.0"
+tokio-connectors = "0.1.1"
 gpsd_proto = "1.0.0"
 
 rgps = "0.1.0"

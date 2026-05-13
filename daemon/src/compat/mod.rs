@@ -1,23 +1,23 @@
 //! A gpsd compatibility layer for rgpsd.
-//! 
+//!
 //! This provides a TCP server implementing a chunk of the GPSD protocol,
 //! allowing existing GPSD clients to connect and receive GPS state updates and
 //! satellite information from rgpsd.
-//! 
+//!
 
 #![allow(dead_code, unused)]
 use std::fmt::Display;
 
 use futures::StreamExt;
+use gpsd_proto::UnifiedResponse;
 use serde::{Deserialize, Serialize};
-use tracing::debug;
 use tokio::{
+    select,
     sync::{broadcast::Sender as BroadcastSender, mpsc::UnboundedReceiver},
     task,
-    select,
 };
-use tokio_connectors::{tcp::TcpServer, codecs::Codec, error::{Error as CodecError}};
-use gpsd_proto::UnifiedResponse;
+use tokio_connectors::{codecs::Codec, error::Error as CodecError, tcp::TcpServer};
+use tracing::debug;
 
 mod commands;
 use commands::{DeviceArgs, GpsdCommand, WatchArgs};
@@ -44,7 +44,7 @@ impl CompatActor {
 
         let handle = tokio::task::spawn(async move {
             loop {
-                select!{
+                select! {
                     // Handle incoming GPSD commands from clients
                     Some((req, addr)) = compat.server.next() => {
                         debug!("Received GPSD command from {}: {:?}", addr, req);
@@ -61,7 +61,10 @@ impl CompatActor {
             }
         });
 
-        Ok(Self { _handle: handle, exit_tx })
+        Ok(Self {
+            _handle: handle,
+            exit_tx,
+        })
     }
 }
 
@@ -77,54 +80,41 @@ impl Compat {
 
     async fn handle_cmd(&mut self, cmd: GpsdCommand) -> UnifiedResponse {
         match &cmd {
-            GpsdCommand::Version => {
-                UnifiedResponse::Version(
-                    gpsd_proto::Version {
-                        release: env!("CARGO_PKG_VERSION").to_string(),
-                        rev: "TODO".to_string(),
-                        proto_major: 3,
-                        proto_minor: 0,
-                        remote: None,
-                    }
-                )
-            },
+            GpsdCommand::Version => UnifiedResponse::Version(gpsd_proto::Version {
+                release: env!("CARGO_PKG_VERSION").to_string(),
+                rev: "TODO".to_string(),
+                proto_major: 3,
+                proto_minor: 0,
+                remote: None,
+            }),
             GpsdCommand::Devices => {
                 debug!("Received DEVICES command");
 
-                UnifiedResponse::Error (
-                    gpsd_proto::ErrorResponse {
-                        message: format!("Unsupported command: {:?}", cmd),
-                    }
-                )
-            },
+                UnifiedResponse::Error(gpsd_proto::ErrorResponse {
+                    message: format!("Unsupported command: {:?}", cmd),
+                })
+            }
             GpsdCommand::Watch(args) => {
                 debug!("Received WATCH command with args: {:?}", args);
 
-
-                UnifiedResponse::Error (
-                    gpsd_proto::ErrorResponse {
-                        message: format!("Unsupported command: {:?}", cmd),
-                    }
-                )
-            },
+                UnifiedResponse::Error(gpsd_proto::ErrorResponse {
+                    message: format!("Unsupported command: {:?}", cmd),
+                })
+            }
             GpsdCommand::Poll => {
                 debug!("Received POLL command");
 
-                UnifiedResponse::Error (
-                    gpsd_proto::ErrorResponse {
-                        message: format!("Unsupported command: {:?}", cmd),
-                    }
-                )
-            },
+                UnifiedResponse::Error(gpsd_proto::ErrorResponse {
+                    message: format!("Unsupported command: {:?}", cmd),
+                })
+            }
             GpsdCommand::Device(args) => {
                 debug!("Received DEVICE command with args: {:?}", args);
 
-                UnifiedResponse::Error (
-                    gpsd_proto::ErrorResponse {
-                        message: format!("Unsupported command: {:?}", cmd),
-                    }
-                )
-            },
+                UnifiedResponse::Error(gpsd_proto::ErrorResponse {
+                    message: format!("Unsupported command: {:?}", cmd),
+                })
+            }
         }
     }
 }
@@ -155,8 +145,7 @@ impl Codec<UnifiedResponse, GpsdCommand> for GpsdCodec {
             Err(_) => return Ok(None),
         };
 
-        let (cmd, n) = GpsdCommand::parse(&s)
-            .map_err(|_e| CodecError::Send)?;
+        let (cmd, n) = GpsdCommand::parse(&s).map_err(|_e| CodecError::Send)?;
 
         // Drain the buffer up to the end of the command
         src.drain(0..n);
@@ -164,5 +153,3 @@ impl Codec<UnifiedResponse, GpsdCommand> for GpsdCodec {
         Ok(Some(cmd))
     }
 }
-
-
