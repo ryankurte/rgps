@@ -71,7 +71,6 @@ jobs:
     - name: Configure toolchain
       uses: actions-rust-lang/setup-rust-toolchain@v1.16.1
       with:
-        toolchain: nightly
         target:  ${{ matrix.target }}
         override: true
 
@@ -90,6 +89,9 @@ jobs:
 
     - name: Install cargo sbom
       run: cargo install cargo-sbom --locked
+
+    - name: Fetch cargo deps
+      run: cargo fetch --locked
 
     - name: Build daemon (cross)
       if: ${{ matrix.use_cross }}
