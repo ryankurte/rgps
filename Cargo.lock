@@ -2167,12 +2167,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "rgps-ctl"
+name = "rgps"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "rgps-proto",
+ "geoutils",
+ "nmea",
  "serde",
  "serde_json",
  "strum",
@@ -2183,7 +2184,23 @@ dependencies = [
 ]
 
 [[package]]
-name = "rgps-daemon"
+name = "rgpsc"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "rgps",
+ "serde",
+ "serde_json",
+ "strum",
+ "tokio",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "rgpsd"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -2204,7 +2221,7 @@ dependencies = [
  "nmea",
  "ntrip-client",
  "reqwest 0.13.3",
- "rgps-proto",
+ "rgps",
  "rtcm-rs",
  "rust_iso3166",
  "rustls",
@@ -2222,23 +2239,6 @@ dependencies = [
  "tracing-subscriber",
  "ublox",
  "webpki-roots",
-]
-
-[[package]]
-name = "rgps-proto"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "geoutils",
- "nmea",
- "serde",
- "serde_json",
- "strum",
- "tokio",
- "toml",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]

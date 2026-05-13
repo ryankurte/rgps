@@ -12,7 +12,7 @@ use tokio_connectors::{codecs::Json, unix::UnixServer};
 use tracing::{debug, error, info, level_filters::LevelFilter, trace};
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
-use rgps_proto::{Req, Resp, State};
+use rgps::{Req, Resp, State};
 
 pub mod config;
 pub mod error;

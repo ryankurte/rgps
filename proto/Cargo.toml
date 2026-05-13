@@ -1,7 +1,10 @@
 [package]
-name = "rgps-proto"
-version = "0.1.0"
-edition = "2024"
+name = "rgps"
+description = "RGPS - Protocols, parsing and shared types for RGPS(D|C)"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
 
 [dependencies]
 anyhow = { workspace = true }

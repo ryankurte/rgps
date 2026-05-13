@@ -1,5 +1,5 @@
 [package]
-name = "rgps-daemon"
+name = "rgpsd"
 description = "RGPSD - A GPS + RTK + NTRIP Daemon in Rust"
 version.workspace = true
 edition.workspace = true
@@ -50,7 +50,7 @@ thiserror = { workspace = true }
 serialport5 = { workspace = true }
 tokio-serial = { workspace = true }
 
-rgps-proto = { workspace = true }
+rgps = { workspace = true }
 
 rtcm-rs = { workspace = true }
 gnss-rs = { workspace = true }

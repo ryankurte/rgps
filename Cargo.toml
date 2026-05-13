@@ -10,10 +10,6 @@ repository = "https://github.com/ryankurte/rgpsd"
 license = "GPL-3.0-or-later"
 
 [workspace.dependencies]
-rgps-proto = { path = "./proto" }
-rgps-daemon = { path = "./daemon" }
-rgps-ctl = { path = "./ctl" }
-
 anyhow = "1.0.102"
 serde = { version = "1.0.228", default-features = false, features = ["derive", "std"] }
 toml = { version = "0.9.12" }
@@ -50,6 +46,10 @@ nmea = { version = "0.7.0", features = ["serde"] }
 ntrip-client = "0.1.0"
 tokio-connectors = "0.1.0"
 gpsd_proto = "1.0.0"
+
+rgps = { path = "./proto" }
+rgpsd = { path = "./daemon" }
+rgpsc = { path = "./ctl" }
 
 [patch.crates-io]
 #ntrip-client = { path = "../ntrip-client" }

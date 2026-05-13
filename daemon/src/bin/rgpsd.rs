@@ -4,7 +4,7 @@ use clap::Parser;
 use rustls::crypto::CryptoProvider;
 use tracing::{debug, info, level_filters::LevelFilter};
 
-use rgps_daemon::{
+use rgpsd::{
     Gpsd,
     config::{GpsdConfig, default_config_path},
     setup_logging,
