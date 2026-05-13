@@ -93,11 +93,11 @@ jobs:
 
     - name: Build daemon (cross)
       if: ${{ matrix.use_cross }}
-      run: cross build --manifest-path daemon/Cargo.toml --target ${{ matrix.target }} --release
+      run: cross build --manifest-path daemon/Cargo.toml --target ${{ matrix.target }} --release --locked
 
     - name: Build daemon (native)
       if: ${{ !matrix.use_cross }}
-      run: cargo build --manifest-path daemon/Cargo.toml --target ${{ matrix.target }} --release
+      run: cargo build --manifest-path daemon/Cargo.toml --target ${{ matrix.target }} --release --locked
 
     - name: Copy out the binary
       run: |
