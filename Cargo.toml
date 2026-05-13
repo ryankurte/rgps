@@ -65,6 +65,7 @@ rgpsc = { path = "./ctl" }
 ntrip-client = { git = "https://github.com/nav-solutions/ntrip-client", branch = "chore/tidy-interface" }
 nmea = { git = "https://github.com/AeroRust/nmea", branch = "main" }
 gpsd_proto = { git = "https://github.com/ryankurte/gpsd_proto.git", branch = "fix/serde" }
+postcard = { git = "https://github.com/jamesmunns/postcard", branch = "main" }
 
 [profile.release]
 strip = true
