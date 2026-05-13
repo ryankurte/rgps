@@ -42,7 +42,7 @@ jobs:
 
   build-daemon:
     runs-on: ${{ matrix.os }}
-    continue-on-error: true
+    continue-on-error: false
 
     strategy:
       fail-fast: false
@@ -82,6 +82,9 @@ jobs:
     - name: Install cargo deb
       run: cargo install cargo-deb --locked
 
+    - name: Install cargo sbom
+      run: cargo install cargo-sbom --locked
+
     - name: Build daemon (cross)
       if: ${{ matrix.use_cross }}
       run: cross build --manifest-path daemon/Cargo.toml --target ${{ matrix.target }} --release
@@ -95,10 +98,15 @@ jobs:
         cp target/${{ matrix.target }}/release/rgpsd rgpsd-${{ matrix.target }}${{ matrix.os == 'windows-latest' && '.exe' || '' }}
         tar -czvf rgpsd-${{ matrix.target }}.tgz rgpsd-${{ matrix.target }}${{ matrix.os == 'windows-latest' && '.exe' || '' }}
 
-    - name: Generate artifact attestation
-      uses: actions/attest@v4
-      with:
-        subject-path: rgpsd-${{ matrix.target }}${{ matrix.os == 'windows-latest' && '.exe' || '' }}
+    - name: Generate SBOM
+      run: cargo-sbom --output-format=cyclone_dx_json_1_4 > rgps.json
+
+    # TODO: enable this when the repo is public
+    #- name: Generate artifact attestation
+    #  uses: actions/attest@v4
+    #  with:
+    #    subject-path: rgpsd-${{ matrix.target }}${{ matrix.os == 'windows-latest' && '.exe' || '' }}
+    #    sbom-path: rgps.json
 
     - name: Package daemon (ubuntu targets)
       if: ${{ matrix.os == 'ubuntu-latest' }}

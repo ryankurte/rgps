@@ -47,15 +47,21 @@ ntrip-client = "0.1.0"
 tokio-connectors = "0.1.0"
 gpsd_proto = "1.0.0"
 
+rgps = "0.1.0"
+rgpsd = "0.1.0"
+rgpsc = "0.1.0"
+
+[patch.crates-io]
+# Patches allowing us to do local development
 rgps = { path = "./proto" }
 rgpsd = { path = "./daemon" }
 rgpsc = { path = "./ctl" }
 
-[patch.crates-io]
 #ntrip-client = { path = "../ntrip-client" }
 #nmea = { path = "../nmea" }
 #gpsd_proto = { path = "../gpsd_proto" }
 
+# Patches to update dependencies with fixes/changes that haven't been released yet
 ntrip-client = { git = "https://github.com/nav-solutions/ntrip-client", branch = "chore/tidy-interface" }
 nmea = { git = "https://github.com/AeroRust/nmea", branch = "main" }
 gpsd_proto = { git = "https://github.com/ryankurte/gpsd_proto.git", branch = "fix/serde" }

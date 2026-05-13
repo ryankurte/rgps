@@ -19,3 +19,6 @@ deb-linux-armv7: daemon-linux-armv7
 	cargo deb --manifest-path daemon/Cargo.toml --target armv7-unknown-linux-gnueabihf --release --no-build
 
 debs: deb-linux-x64 deb-linux-aarch64 deb-linux-armv7
+
+sbom:
+	cargo-sbom --output-format=cyclone_dx_json_1_4 > rgps.json
