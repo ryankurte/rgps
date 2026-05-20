@@ -12,8 +12,8 @@ pub enum Req {
 /// GPSD protocol responses
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub enum Resp {
-    State(State),
-    Satellites(Vec<nmea::Satellite>),
+    State(Vec<State>),
+    Satellites(Vec<Vec<nmea::Satellite>>),
 }
 
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
@@ -23,6 +23,7 @@ pub struct State {
     pub location: Option<Location>,
     pub altitude: Option<f64>,
     pub speed: Option<f64>,
+    // TODO: move this
     pub mount: Option<String>,
     pub dop: Dop,
 }

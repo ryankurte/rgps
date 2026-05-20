@@ -5,24 +5,21 @@ use std::path::{Path, PathBuf};
 #[cfg(not(target_family = "unix"))]
 use std::net::SocketAddr;
 
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use serde::{Deserialize, Serialize};
 
 use ntrip_client::{NtripConfig, NtripCredentials};
 
 /// GPS Daemon configuration options
-#[derive(Clone, PartialEq, Debug, Parser, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct GpsdConfig {
-    /// Daemon control socket
-    #[clap(flatten)]
+    /// General configuration
     pub general: General,
 
-    /// GPS device configuration
-    #[clap(flatten)]
-    pub gps: Gps,
+    /// GPS devices
+    pub gps: Vec<Gps>,
 
     // NTRIP configuration options
-    #[clap(flatten)]
     #[serde(default)]
     pub ntrip: Option<Ntrip>,
 }
@@ -90,6 +87,27 @@ pub struct Gps {
     /// GPS device baud rate
     #[clap(short = 'b', long, default_value = "115200", env = "GPSD_GPS_BAUD")]
     pub gps_baud: u32,
+
+    /// GPS device kind
+    #[clap(long, default_value = "generic", env = "GPSD_GPS_KIND")]
+    pub gps_kind: GpsKind,
+}
+
+/// GPS device kind, used for vendor-specific parsing and configuration
+#[derive(Clone, PartialEq, Debug, ValueEnum, Serialize, Deserialize)]
+pub enum GpsKind {
+    /// Generic GPS device (default)
+    Generic,
+    /// Ublox GPS device
+    Ublox,
+    /// Quectel GPS device
+    Quectel,
+}
+
+impl Default for GpsKind {
+    fn default() -> Self {
+        GpsKind::Generic
+    }
 }
 
 #[derive(Clone, PartialEq, Debug, Parser, Serialize, Deserialize)]
@@ -162,7 +180,7 @@ mod tests {
         let parsed: GpsdConfig = toml::from_str(config).expect("Failed to parse config");
 
         assert_eq!(parsed.general.ctl_sock, PathBuf::from("/tmp/rgpsd.sock"));
-        assert_eq!(parsed.gps.gps_port, PathBuf::from("/dev/ttyACM0"));
-        assert_eq!(parsed.gps.gps_baud, 115200);
+        assert_eq!(parsed.gps[0].gps_port, PathBuf::from("/dev/ttyACM0"));
+        assert_eq!(parsed.gps[0].gps_baud, 115200);
     }
 }

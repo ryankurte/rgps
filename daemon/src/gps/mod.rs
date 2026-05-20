@@ -8,7 +8,10 @@ use nmea::{Nmea, SentenceType};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     select,
-    sync::mpsc::{UnboundedReceiver, UnboundedSender},
+    sync::{
+        broadcast::Sender as BroadcastSender,
+        mpsc::{UnboundedReceiver, UnboundedSender},
+    },
 };
 use tokio_serial::SerialPortBuilderExt as _;
 use tracing::{debug, error, trace};
@@ -16,10 +19,15 @@ use tracing::{debug, error, trace};
 mod parser;
 use parser::GpsAccumulator;
 
-pub struct Gps {
+/// A handle to a GPS device, providing a stream of updates* and a sink for sending
+/// data / control messages to the GPS device.
+///
+/// * updates can be received as a [Stream] on [Gps] using [Gps::connect] or
+/// sent to a previously created channel using [Gps::connect_with_channel].
+pub struct Gps<RX = UnboundedReceiver<GpsMessage>> {
     exit_tx: tokio::sync::broadcast::Sender<()>,
     state: Arc<Mutex<Nmea>>,
-    update_rx: UnboundedReceiver<GpsMessage>,
+    update_rx: RX,
     write_tx: UnboundedSender<Vec<u8>>,
     _handle: tokio::task::JoinHandle<()>,
 }
@@ -44,9 +52,64 @@ pub enum GpsMessage {
     Ubx(Vec<u8>),
 }
 
-impl Gps {
+impl Gps<UnboundedReceiver<GpsMessage>> {
+    /// Connect to a GPS device on the specified serial port and baud rate,
+    pub async fn connect(port: &Path, baud_rate: u32) -> Result<Gps, GpsError> {
+        let (update_tx, update_rx) = tokio::sync::mpsc::unbounded_channel::<GpsMessage>();
+        let (exit_tx, _exit_rx) = tokio::sync::broadcast::channel(1);
+
+        let (state, write_tx, _handle) =
+            Self::connect_internal(port, baud_rate, exit_tx.clone(), update_tx).await?;
+
+        Ok(Gps {
+            exit_tx: exit_tx,
+            state: state,
+            update_rx,
+            write_tx,
+            _handle,
+        })
+    }
+}
+
+impl Gps<()> {
+    /// Connect to a GPS device on the specified serial port and baud rate.
+    ///
+    /// Using the provided channel for updates instead of creating an internal one.
+    pub async fn connect_with_channel(
+        port: &Path,
+        baud_rate: u32,
+        update_tx: UnboundedSender<GpsMessage>,
+    ) -> Result<Self, GpsError> {
+        let (exit_tx, _exit_rx) = tokio::sync::broadcast::channel(1);
+
+        let (state, write_tx, _handle) =
+            Self::connect_internal(port, baud_rate, exit_tx.clone(), update_tx).await?;
+
+        Ok(Gps {
+            exit_tx: exit_tx,
+            state: state,
+            update_rx: (),
+            write_tx,
+            _handle,
+        })
+    }
+}
+
+impl<RX> Gps<RX> {
     /// Connect to a GPS device on the specified serial port and baud rate
-    pub async fn connect(port: &Path, baud_rate: u32) -> Result<Self, GpsError> {
+    pub async fn connect_internal(
+        port: &Path,
+        baud_rate: u32,
+        exit_tx: BroadcastSender<()>,
+        update_tx: UnboundedSender<GpsMessage>,
+    ) -> Result<
+        (
+            Arc<Mutex<Nmea>>,
+            UnboundedSender<Vec<u8>>,
+            tokio::task::JoinHandle<()>,
+        ),
+        GpsError,
+    > {
         debug!(
             "Connecting to GPS on port {} at {} baud",
             port.display(),
@@ -62,8 +125,7 @@ impl Gps {
         let state = Arc::new(Mutex::new(Nmea::default()));
 
         let state_handle = state.clone();
-        let (exit_tx, mut exit_rx) = tokio::sync::broadcast::channel(1);
-        let (update_tx, update_rx) = tokio::sync::mpsc::unbounded_channel::<GpsMessage>();
+        let mut exit_rx = exit_tx.subscribe();
         let (write_tx, mut write_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
 
         let _handle = tokio::task::spawn(async move {
@@ -131,13 +193,7 @@ impl Gps {
             debug!("GPS read task exited");
         });
 
-        Ok(Self {
-            exit_tx,
-            state,
-            update_rx,
-            write_tx,
-            _handle,
-        })
+        Ok((state, write_tx, _handle))
     }
 
     /// Fetch current NMEA state
@@ -146,7 +202,7 @@ impl Gps {
     }
 }
 
-impl Drop for Gps {
+impl<RX> Drop for Gps<RX> {
     fn drop(&mut self) {
         let _ = self.exit_tx.send(());
     }
@@ -155,7 +211,7 @@ impl Drop for Gps {
 /// [Stream] of [GpsMessage] updates from the GPS device
 ///
 /// Note: current GPS state can be fetched using the [nmea](Gps::nmea) method
-impl Stream for Gps {
+impl Stream for Gps<UnboundedReceiver<GpsMessage>> {
     type Item = GpsMessage;
 
     fn poll_next(
@@ -167,7 +223,7 @@ impl Stream for Gps {
 }
 
 /// [Sink] for sending raw data / control messages to the GPS device
-impl Sink<Vec<u8>> for Gps {
+impl<RX> Sink<Vec<u8>> for Gps<RX> {
     type Error = tokio::sync::mpsc::error::SendError<Vec<u8>>;
 
     fn poll_ready(

@@ -5,7 +5,7 @@ use rustls::crypto::CryptoProvider;
 use tracing::{debug, info, level_filters::LevelFilter};
 
 use rgpsd::{
-    Gpsd,
+    Rgpsd,
     config::{GpsdConfig, default_config_path},
     setup_logging,
 };
@@ -50,7 +50,7 @@ async fn main() -> anyhow::Result<()> {
     });
 
     // Start GPS daemon
-    let _gpsd = Gpsd::spawn(config, exit_tx.clone()).await?;
+    let _gpsd = Rgpsd::spawn(config, exit_tx.clone()).await?;
 
     // Await exit signal
     exit_rx.recv().await?;
