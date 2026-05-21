@@ -6,10 +6,10 @@
 //!
 
 #![allow(dead_code, unused)]
-use std::fmt::Display;
+use std::{collections::HashMap, fmt::Display, net::SocketAddr};
 
 use futures::StreamExt;
-use gpsd_proto::UnifiedResponse;
+use gpsd_proto::{Devices, Tpv, UnifiedResponse};
 use serde::{Deserialize, Serialize};
 use tokio::{
     select,
@@ -22,10 +22,24 @@ use tracing::debug;
 mod commands;
 use commands::{DeviceArgs, GpsdCommand, WatchArgs};
 
+mod responses;
+
 /// GPSD compatibility layer for rgpsd.
 pub struct Compat {
     /// The TCP server implementing the GPSD protocol.
     server: TcpServer<GpsdCodec, UnifiedResponse, GpsdCommand>,
+
+    /// Collection of subscribers to support "WATCH" commands
+    subscribers: HashMap<SocketAddr, SubscriberInfo>,
+}
+
+struct SubscriberInfo {
+    addr: SocketAddr,
+    
+    device: Option<String>,
+    send_json: bool,
+    send_nmea: bool,
+    send_bin: bool,
 }
 
 /// Codec for encoding/decoding GPSD protocol messages.
@@ -48,7 +62,7 @@ impl CompatActor {
                     // Handle incoming GPSD commands from clients
                     Some((req, addr)) = compat.server.next() => {
                         debug!("Received GPSD command from {}: {:?}", addr, req);
-                        let res = compat.handle_cmd(req).await;
+                        let res = compat.handle_cmd(req, addr).await;
 
                         debug!("Responding to {} with: {:?}", addr, res);
                         compat.server.send(res, addr).await?;
@@ -75,10 +89,10 @@ impl Compat {
 
         let server = TcpServer::bind(addr).await?;
 
-        Ok(Self { server })
+        Ok(Self { server, subscribers: HashMap::new() })
     }
 
-    async fn handle_cmd(&mut self, cmd: GpsdCommand) -> UnifiedResponse {
+    async fn handle_cmd(&mut self, cmd: GpsdCommand, addr: SocketAddr) -> UnifiedResponse {
         match &cmd {
             GpsdCommand::Version => UnifiedResponse::Version(gpsd_proto::Version {
                 release: env!("CARGO_PKG_VERSION").to_string(),
@@ -90,8 +104,9 @@ impl Compat {
             GpsdCommand::Devices => {
                 debug!("Received DEVICES command");
 
-                UnifiedResponse::Error(gpsd_proto::ErrorResponse {
-                    message: format!("Unsupported command: {:?}", cmd),
+                // Return available devices
+                UnifiedResponse::Devices(Devices{
+                    devices: vec![], // TODO
                 })
             }
             GpsdCommand::Watch(args) => {
@@ -101,8 +116,14 @@ impl Compat {
                     message: format!("Unsupported command: {:?}", cmd),
                 })
             }
+            /// Fetch the current state of all GPS devices.
             GpsdCommand::Poll => {
                 debug!("Received POLL command");
+
+                //UnifiedResponse::Tpv(Tpv{
+                //    device: todo!(),
+                //    ..Default::default()
+                //});
 
                 UnifiedResponse::Error(gpsd_proto::ErrorResponse {
                     message: format!("Unsupported command: {:?}", cmd),

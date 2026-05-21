@@ -231,13 +231,10 @@ mod tests {
     #[test]
     fn test_parse_commands() {
         let test: &[(&str, Result<GpsdCommand, ParseCommandError>)] = &[
-            // No-arg commands
             ("?VERSION;", Ok(GpsdCommand::Version)),
             ("?DEVICES;", Ok(GpsdCommand::Devices)),
             ("?POLL;", Ok(GpsdCommand::Poll)),
-            // WATCH — no args
             ("?WATCH;", Ok(GpsdCommand::Watch(None))),
-            // WATCH — with args
             (
                 "?WATCH={\"json\":true,\"pps\":true};",
                 Ok(GpsdCommand::Watch(Some(WatchArgs {
@@ -258,9 +255,7 @@ mod tests {
                     ..Default::default()
                 }))),
             ),
-            // DEVICE — no args
             ("?DEVICE;", Ok(GpsdCommand::Device(None))),
-            // DEVICE — with args
             (
                 "?DEVICE={\"path\":\"/dev/ttyUSB0\",\"bps\":115200,\"parity\":\"N\",\"stopbits\":1};",
                 Ok(GpsdCommand::Device(Some(DeviceArgs {
@@ -280,7 +275,7 @@ mod tests {
                     ..Default::default()
                 }))),
             ),
-            // Error cases
+            // Invalid commands
             ("VERSION;", Err(ParseCommandError::InvalidFormat)),
             ("?VERSION", Err(ParseCommandError::InvalidFormat)),
             (
@@ -298,7 +293,6 @@ mod tests {
 
         for (input, expected) in test {
             let parsed = GpsdCommand::from_str(input);
-            // For InvalidArgs we only check the variant, not the serde message string.
             match (parsed, expected) {
                 (
                     Err(ParseCommandError::InvalidArgs(_)),
@@ -326,7 +320,7 @@ mod tests {
             GpsdCommand::Device(None),
             GpsdCommand::Device(Some(DeviceArgs {
                 path: Some("/dev/ttyUSB0".to_string()),
-                bps: Some(9600),
+                bps: Some(115200),
                 ..Default::default()
             })),
         ];
