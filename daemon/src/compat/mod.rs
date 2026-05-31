@@ -35,7 +35,7 @@ pub struct Compat {
 
 struct SubscriberInfo {
     addr: SocketAddr,
-    
+
     device: Option<String>,
     send_json: bool,
     send_nmea: bool,
@@ -89,7 +89,10 @@ impl Compat {
 
         let server = TcpServer::bind(addr).await?;
 
-        Ok(Self { server, subscribers: HashMap::new() })
+        Ok(Self {
+            server,
+            subscribers: HashMap::new(),
+        })
     }
 
     async fn handle_cmd(&mut self, cmd: GpsdCommand, addr: SocketAddr) -> UnifiedResponse {
@@ -105,7 +108,7 @@ impl Compat {
                 debug!("Received DEVICES command");
 
                 // Return available devices
-                UnifiedResponse::Devices(Devices{
+                UnifiedResponse::Devices(Devices {
                     devices: vec![], // TODO
                 })
             }
@@ -166,7 +169,7 @@ impl Codec<UnifiedResponse, GpsdCommand> for GpsdCodec {
             Err(_) => return Ok(None),
         };
 
-        let (cmd, n) = GpsdCommand::parse(&s).map_err(|_e| CodecError::Send)?;
+        let (cmd, n) = GpsdCommand::parse(s).map_err(|_e| CodecError::Send)?;
 
         // Drain the buffer up to the end of the command
         src.drain(0..n);

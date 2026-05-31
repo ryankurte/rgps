@@ -85,21 +85,27 @@ impl NtripActor {
 
         // Setup the NTRIP context and spawn the actor task
         let mut ctx = NtripContext::new(config, ntrip_tx).await?;
-        let handle = tokio::task::spawn(async move {
-            loop {
-                select! {
-                    // Handle incoming commands
-                    Some((msg, tx)) = cmd_rx.recv() => {
-                        let res = ctx.handle_cmd(msg).await;
-                        let _ = tx.send(res);
-                    },
-                    else => {
-                        debug!("NTRIP command channel closed, exiting NTRIP actor");
-                        return Ok(());
-                    },
+
+        let task_builder = tokio::task::Builder::new().name("ntrip");
+        let handle = task_builder
+            .spawn(async move {
+                loop {
+                    select! {
+                        // Handle incoming commands
+                        Some((msg, tx)) = cmd_rx.recv() => {
+                            let res = ctx.handle_cmd(msg).await;
+                            let _ = tx.send(res);
+                        },
+                        else => {
+                            debug!("NTRIP command channel closed, exiting NTRIP actor");
+                            return Ok(());
+                        },
+                    }
                 }
-            }
-        });
+            })
+            .map_err(|e| {
+                Error::Runtime(anyhow::anyhow!("Failed to spawn NTRIP actor task: {}", e))
+            })?;
 
         Ok(Self {
             cmd_tx,
@@ -167,7 +173,7 @@ impl NtripContext {
         );
 
         // Update the current location
-        self.location = Some(location.clone());
+        self.location = Some(location);
 
         // If we have a mount, check if it's within the distance threshold.
         // Otherwise, we'll try find a new one.
@@ -177,7 +183,7 @@ impl NtripContext {
                     .info
                     .location
                     .distance_to(&location)
-                    .map_err(|e| Error::DistanceCalc(e))?;
+                    .map_err(Error::DistanceCalc)?;
 
                 if distance.meters() < self.config.distance_threshold {
                     debug!(
@@ -202,7 +208,7 @@ impl NtripContext {
             .client
             .list_mounts()
             .await
-            .map_err(|e| Error::Ntrip(e))?;
+            .map_err(Error::Ntrip)?;
 
         let nearest = match server_info.find_nearest(&location) {
             Some((m, d)) if d < self.config.distance_threshold => {
@@ -228,7 +234,7 @@ impl NtripContext {
             .client
             .mount_with_sink(nearest.name.clone(), self.ntrip_sink.clone())
             .await
-            .map_err(|e| Error::Ntrip(e))?;
+            .map_err(Error::Ntrip)?;
 
         info!("Successful (re)mount {}", nearest.name);
 
@@ -259,7 +265,7 @@ impl NtripContext {
             NtripCmd::UpdateLocation(location) => match self.update_location(location).await {
                 Ok(Some(mount)) => NtripRes::Mounts(vec![mount]),
                 Ok(None) => NtripRes::Ok,
-                Err(e) => NtripRes::Error(e.into()),
+                Err(e) => NtripRes::Error(e),
             },
         }
     }

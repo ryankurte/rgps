@@ -1,8 +1,11 @@
 //! A rust-based GPS daemon with dynamic NTRIP client support.
 
+use std::collections::HashMap;
+
+use console_subscriber::ConsoleLayer;
 use futures::SinkExt;
 use geoutils::Location;
-use nmea::Satellite;
+use nmea::{Satellite, SentenceType};
 use rtcm_rs::Message;
 use tokio::{
     sync::{
@@ -12,27 +15,31 @@ use tokio::{
     task,
 };
 use tokio_stream::{StreamExt, StreamMap, wrappers::UnboundedReceiverStream};
-use tracing::{debug, error, info, level_filters::LevelFilter, trace};
-use tracing_subscriber::{EnvFilter, FmtSubscriber};
+use tracing::{debug, error, info, level_filters::LevelFilter, trace, warn};
+use tracing_subscriber::{EnvFilter, Layer, layer::SubscriberExt, util::SubscriberInitExt};
 
 use tokio_connectors::codecs::Json;
 
 // For unix-based platforms we use a Unix domain socket for the control interface.
 #[cfg(target_family = "unix")]
-use tokio_connectors::unix::UnixServer;
+use tokio_connectors::unix::{UnixServer, UnixSocketId};
 
 // For non-unix (aka Windows) we use a TCP socket for the control interface,
 // since windows unix domain socket support has got lost somewhere.
 #[cfg(not(target_family = "unix"))]
+use std::net::SocketAddr;
+#[cfg(not(target_family = "unix"))]
 use tokio_connectors::tcp::TcpServer;
 
-use rgps::{Req, Resp, State};
+use rgps::{GpsState, SubscriptionFlags, req::Req, resp::Resp};
 
 pub mod config;
 pub mod error;
 pub mod gps;
 pub mod ntrip;
 
+mod subscriptions;
+use subscriptions::Subscriptions;
 mod compat;
 
 use crate::{
@@ -62,20 +69,31 @@ struct RgpsdCtx {
     #[cfg(not(target_family = "unix"))]
     ctl_server: TcpServer<Json, Resp, Req>,
 
+    /// Subscription management
+    subscriptions: Subscriptions,
+
     /// Handle to the NTRIP actor, if configured
     ntrip_handle: Option<NtripActor>,
     /// Receiver for messages from the NTRIP actor (e.g. RTCM3 messages to forward to GPS devices)
     ntrip_rx: UnboundedReceiver<(Message, Vec<u8>)>,
 
+    // TODO: move this out to ntrip.rs?
     /// The current NTRIP mountpoint we're connected to (if any)
     current_mount: Option<String>,
     /// The last location we sent to the NTRIP actor, used to determine whether to change mounts
     last_mount_location: Option<Location>,
 }
 
+#[cfg(target_family = "unix")]
+type SubscriptionId = UnixSocketId;
+
+#[cfg(not(target_family = "unix"))]
+type SubscriptionId = SocketAddr;
+
 struct GpsHandle {
     gps: Gps<()>,
-    state: State,
+    info: rgps::GpsInfo,
+    state: GpsState,
     satellites: Vec<Satellite>,
 }
 
@@ -87,18 +105,23 @@ impl Rgpsd {
         let gpsd_ctx = RgpsdCtx::new(opts, exit.clone()).await?;
 
         // Spawn a task to run the GPSD main loop
-        let ctl_task_handle = task::spawn(async move {
-            match gpsd_ctx.run().await {
-                Ok(_) => {
-                    debug!("GPSD main loop exited successfully");
-                    Ok(())
+        let task_builder = tokio::task::Builder::new().name("rgpsd");
+        let ctl_task_handle = task_builder
+            .spawn(async move {
+                match gpsd_ctx.run().await {
+                    Ok(_) => {
+                        debug!("GPSD main loop exited successfully");
+                        Ok(())
+                    }
+                    Err(e) => {
+                        error!("GPSD main loop exited with error: {}", e);
+                        Err(e)
+                    }
                 }
-                Err(e) => {
-                    error!("GPSD main loop exited with error: {}", e);
-                    Err(e)
-                }
-            }
-        });
+            })
+            .map_err(|e| {
+                Error::Runtime(anyhow::anyhow!("Failed to spawn GPSD main task: {}", e))
+            })?;
 
         Ok(Self {
             _ctl_task_handle: ctl_task_handle,
@@ -122,11 +145,16 @@ impl RgpsdCtx {
             );
 
             let (gps_tx, gps_rx) = unbounded_channel::<GpsMessage>();
-            let gps = Gps::connect_with_channel(&gps.gps_port, gps.gps_baud, gps_tx).await?;
+            let gps_handle = Gps::connect_with_channel(&gps.gps_port, gps.gps_baud, gps_tx).await?;
 
             gpss.push(GpsHandle {
-                gps,
-                state: State::default(),
+                gps: gps_handle,
+                info: rgps::GpsInfo {
+                    port: gps.gps_port.to_string_lossy().into_owned(),
+                    baud: gps.gps_baud,
+                    kind: gps.gps_kind.clone(),
+                },
+                state: GpsState::default(),
                 satellites: Vec::new(),
             });
 
@@ -159,6 +187,7 @@ impl RgpsdCtx {
             exit_tx,
 
             ctl_server,
+            subscriptions: Subscriptions::default(),
 
             ntrip_handle,
             ntrip_rx,
@@ -180,7 +209,9 @@ impl RgpsdCtx {
                     debug!("Received request: {:?}", req);
 
                     // Handle the request
-                    let res = self.handle_cmd(req).await;
+                    let res = self.handle_cmd(req, req_id).await;
+
+                    debug!("Response: {:?}", res);
 
                     // Forward the response
                     if let Err(e) = self.ctl_server.send(res, req_id).await {
@@ -232,38 +263,102 @@ impl RgpsdCtx {
     }
 
     /// Handle an incoming control command and produce a response
-    async fn handle_cmd(&mut self, cmd: Req) -> Resp {
+    async fn handle_cmd(&mut self, cmd: Req, client_id: SubscriptionId) -> Resp {
         match cmd {
-            Req::GetState => {
-                Resp::State(self.gps_handles.iter().map(|h| h.state.clone()).collect())
-            }
+            Req::GetInfo => Resp::Info(
+                self.gps_handles
+                    .iter()
+                    .enumerate()
+                    .map(|(i, h)| (i as u32, h.info.clone()))
+                    .collect(),
+            ),
+            Req::GetState => Resp::State(
+                self.gps_handles
+                    .iter()
+                    .enumerate()
+                    .map(|(i, h)| (i as u32, h.state.clone()))
+                    .collect(),
+            ),
             Req::GetSatellites => Resp::Satellites(
                 self.gps_handles
                     .iter()
-                    .map(|h| h.satellites.clone())
+                    .enumerate()
+                    .map(|(i, h)| (i as u32, h.satellites.clone()))
                     .collect(),
             ),
+            Req::Subscribe(flags) => {
+                if flags.is_empty() {
+                    debug!("Unsubscribing client {}", client_id);
+                    self.subscriptions.remove(&client_id);
+                } else {
+                    debug!("Subscribing client {} to: {:?}", client_id, flags);
+                    self.subscriptions.subscribe(client_id, flags);
+                }
+
+                Resp::Ok
+            }
         }
     }
 
     /// Handle GPS updates
     async fn handle_gps_update(&mut self, index: usize, msg: GpsMessage) {
         match msg {
-            GpsMessage::Nmea(nmea, _sentence_type) => {
-                self.handle_nmea(index, nmea).await;
+            GpsMessage::Nmea(nmea, sentence_type) => {
+                // Handle the NMEA sentence
+                self.handle_nmea(index, sentence_type, nmea.as_ref()).await;
+
+                // Forward to any NMEA subscribers
+                self.forward_to_subscribers(
+                    SubscriptionFlags::NmeaSentences,
+                    Resp::Nmea(index as u32, nmea.to_string()),
+                )
+                .await;
             }
-            GpsMessage::Rtcm3(m, _) => {
+            GpsMessage::Rtcm3(m, raw) => {
                 trace!("Received RTCM message: {:?}", m);
-                return;
+
+                // TODO: handle and route these?
+
+                // Forward to any RTCM3 subscribers
+                self.forward_to_subscribers(
+                    SubscriptionFlags::Rtcm3Sentences,
+                    Resp::Rtcm3(index as u32, raw.clone()),
+                )
+                .await;
             }
             GpsMessage::Ubx(m) => {
                 trace!("Received UBX message: {:?}", m);
-                return;
+
+                // TODO: handle and route these?
+
+                // Forward to any UBX subscribers
+                self.forward_to_subscribers(
+                    SubscriptionFlags::UbxMessages,
+                    Resp::Ubx(index as u32, m.clone()),
+                )
+                .await;
             }
         }
     }
 
-    async fn handle_nmea(&mut self, index: usize, nmea: nmea::Nmea) {
+    /// Forward a response message to all subscribers of a specific subscription flag.
+    async fn forward_to_subscribers(&mut self, flag: SubscriptionFlags, resp: Resp) {
+        let mut removals = Vec::new();
+
+        for i in self.subscriptions.get_subscribers(flag) {
+            debug!("Forwarding message to subscriber {}", i);
+            if let Err(e) = self.ctl_server.send(resp.clone(), *i).await {
+                warn!("Failed to forward message to subscriber {}: {}", i, e);
+                removals.push(*i);
+            }
+        }
+
+        for i in removals {
+            self.subscriptions.remove(&i);
+        }
+    }
+
+    async fn handle_nmea(&mut self, index: usize, sentence_type: SentenceType, nmea: &nmea::Nmea) {
         trace!(
             "NMEA update: {:?}, lat: {:?}, lng: {:?}, alt: {:?}, vdop: {:?}, hdop: {:?} pdop: {:?}",
             nmea.fix_type,
@@ -288,7 +383,7 @@ impl RgpsdCtx {
         let loc = match (nmea.latitude, nmea.longitude) {
             (Some(lat), Some(lon)) => {
                 let loc = Location::new(lat, lon);
-                state.location = Some(loc.clone());
+                state.location = Some(loc);
                 loc
             }
             _ => {
@@ -297,16 +392,37 @@ impl RgpsdCtx {
                 return;
             }
         };
-        state.num_satellites = nmea.num_of_fix_satellites.unwrap_or(0) as u32;
+        state.num_satellites = nmea.num_of_fix_satellites.unwrap_or(0);
         state.dop.hdop = nmea.hdop;
         state.dop.vdop = nmea.vdop;
         state.dop.pdop = nmea.pdop;
 
         *satellites = nmea.satellites().to_vec();
+        let state = state.clone();
 
         // Update NTRIP actor with new location (if we've moved enough to warrant an update).
         // TODO: do we want to be specific about which GPS this comes from?
         self.maybe_update_ntrip_location(loc).await;
+
+        // Forward relevant updates to subscribers
+        match sentence_type {
+            SentenceType::GGA | SentenceType::RMC => {
+                let mut states = HashMap::new();
+                states.insert(index as u32, state.clone());
+                self.forward_to_subscribers(SubscriptionFlags::GpsState, Resp::State(states))
+                    .await;
+            }
+            SentenceType::GSV => {
+                let mut satellite_map = HashMap::new();
+                satellite_map.insert(index as u32, nmea.satellites().to_vec());
+                self.forward_to_subscribers(
+                    SubscriptionFlags::GpsSatellites,
+                    Resp::Satellites(satellite_map),
+                )
+                .await;
+            }
+            _ => {}
+        }
     }
 
     /// Optionally update the NTRIP actor with a new location.
@@ -324,8 +440,7 @@ impl RgpsdCtx {
         // significant distance since last update.
         match self
             .last_mount_location
-            .map(|last_loc| loc.distance_to(&last_loc).ok())
-            .flatten()
+            .and_then(|last_loc| loc.distance_to(&last_loc).ok())
         {
             Some(d) if d.meters() < 1000.0 => return,
             Some(d) => {
@@ -340,7 +455,7 @@ impl RgpsdCtx {
         };
 
         // Update NTRIP actor with new location
-        match ntrip_handle.update_location(loc.clone()).await {
+        match ntrip_handle.update_location(loc).await {
             Ok(Some(m)) => {
                 info!("Updated NTRIP mountpoint to {}", m.name);
                 self.last_mount_location = Some(loc);
@@ -357,16 +472,23 @@ impl RgpsdCtx {
 }
 
 /// Helper to set up logging with the provided level filter
-pub fn setup_logging(log_level: LevelFilter) {
-    let filter = EnvFilter::from_default_env()
+pub fn setup_logging(log_level: LevelFilter, enable_console: bool) {
+    let fmt_filter = EnvFilter::builder()
+        .from_env_lossy()
         .add_directive("hyper_util=WARN".parse().unwrap())
         .add_directive("reqwest=WARN".parse().unwrap())
         .add_directive("rustls=WARN".parse().unwrap())
         .add_directive(log_level.into());
-    let _ = FmtSubscriber::builder()
+
+    let fmt_layer = tracing_subscriber::fmt::layer()
         .compact()
-        .without_time()
-        .with_max_level(log_level)
-        .with_env_filter(filter)
-        .try_init();
+        .with_filter(fmt_filter);
+
+    let registry = tracing_subscriber::registry();
+    let registry = match enable_console {
+        true => registry.with(Some(ConsoleLayer::builder().with_default_env().spawn())),
+        false => registry.with(None),
+    };
+
+    registry.with(fmt_layer).init();
 }

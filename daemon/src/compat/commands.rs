@@ -156,7 +156,7 @@ impl GpsdCommand {
 
         // The command name ends with either `;` or `=`, so look for the first occurrence of either.
         let name_end_pos = s
-            .find(|c| c == ';' || c == '=')
+            .find([';', '='])
             .ok_or(ParseCommandError::InvalidFormat)?;
 
         // Grab the command name and convert to uppercase
@@ -207,7 +207,7 @@ impl GpsdCommand {
                         decoder.byte_offset() + name_end_pos + 1,
                     ))
                 }
-                other => return Err(ParseCommandError::UnknownCommand(other.to_string())),
+                other => Err(ParseCommandError::UnknownCommand(other.to_string())),
             }
         }
     }

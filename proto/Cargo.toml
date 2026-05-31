@@ -16,6 +16,7 @@ strum = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+enumset = { workspace = true }
 
 nmea = { workspace = true }
 geoutils = { workspace = true }

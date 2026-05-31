@@ -1,7 +1,7 @@
 
 [workspace]
 resolver = "3"
-members = [ "proto", "daemon", "ctl" ]
+members = [ "proto", "daemon", "client" ]
 
 [workspace.package]
 version = "0.1.0"
@@ -18,6 +18,7 @@ clap = { version = "4.6.1", features = ["derive", "string"] }
 strum = { version = "0.27.2", features = ["derive"] }
 tracing = { version = "0.1.44", features = ["log"] }
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt", "env-filter"] }
+enumset = { version = "1.1.13", features = ["serde", "alloc"] }
 
 futures = "0.3.32"
 geoutils = { version = "0.5.1", features = ["serde"] }
@@ -31,9 +32,11 @@ http = "1.4.0"
 crc-any = "2.5.0"
 bytebuffer = "2.3.0"
 base64 = "0.22.1"
+humantime = "2.3.0"
 tokio = { version = "1.52.3", features = [ "full" ] }
 tokio-rustls = "0.26.4"
 tokio-stream = "0.1.18"
+console-subscriber = "*"
 rustls = "0.23.40"
 webpki-roots = "1.0.7"
 thiserror = "1.0.69"
@@ -45,7 +48,7 @@ gnss-protos = { version = "0.0.2", features = ["gps"] }
 ublox = { version = "0.6.0", default-features = false, features = ["std", "sfrbx-gps", "ubx_proto23"] }
 nmea = { version = "0.7.0", features = ["serde"] }
 ntrip-client = "0.1.0"
-tokio-connectors = "0.1.1"
+tokio-connectors = "0.1.5"
 gpsd_proto = "1.0.0"
 
 rgps = "0.1.0"
@@ -56,7 +59,7 @@ rgpsc = "0.1.0"
 # Patches allowing us to do local development
 rgps = { path = "./proto" }
 rgpsd = { path = "./daemon" }
-rgpsc = { path = "./ctl" }
+rgpsc = { path = "./client" }
 
 #ntrip-client = { path = "../ntrip-client" }
 #nmea = { path = "../nmea" }
@@ -67,6 +70,8 @@ ntrip-client = { git = "https://github.com/nav-solutions/ntrip-client", branch =
 nmea = { git = "https://github.com/AeroRust/nmea", branch = "main" }
 gpsd_proto = { git = "https://github.com/ryankurte/gpsd_proto.git", branch = "fix/serde" }
 postcard = { git = "https://github.com/jamesmunns/postcard", branch = "main" }
+
+#tokio-connectors = { path = "../../tokio-connectors" }
 
 [profile.release]
 strip = true

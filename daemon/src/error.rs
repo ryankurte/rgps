@@ -22,4 +22,7 @@ pub enum Error {
 
     #[error("GPS error: {0}")]
     Gps(#[from] crate::gps::GpsError),
+
+    #[error("Runtime error: {0}")]
+    Runtime(#[from] anyhow::Error),
 }

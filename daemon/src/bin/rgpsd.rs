@@ -4,11 +4,8 @@ use clap::Parser;
 use rustls::crypto::CryptoProvider;
 use tracing::{debug, info, level_filters::LevelFilter};
 
-use rgpsd::{
-    Rgpsd,
-    config::{GpsdConfig, default_config_path},
-    setup_logging,
-};
+use rgps::default_config_path;
+use rgpsd::{Rgpsd, config::GpsdConfig, setup_logging};
 
 /// RGPSD (GPS + RTK + NTRIP) Daemon
 #[derive(Clone, PartialEq, Debug, Parser)]
@@ -20,6 +17,10 @@ struct Args {
     #[clap(long, default_value = "debug", env = "RGPSD_LOG_LEVEL")]
     /// Set log level
     pub log_level: LevelFilter,
+
+    #[clap(long, env = "RGPSD_LOG_CONSOLE")]
+    /// Enable tokio-console support
+    pub tokio_console: bool,
 }
 
 #[tokio::main]
@@ -31,7 +32,7 @@ async fn main() -> anyhow::Result<()> {
     CryptoProvider::install_default(rustls::crypto::ring::default_provider()).ok();
 
     // Setup logging
-    setup_logging(args.log_level);
+    setup_logging(args.log_level, args.tokio_console);
 
     info!("Start GPSD");
 

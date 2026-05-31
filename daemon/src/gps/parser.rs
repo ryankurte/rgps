@@ -36,8 +36,8 @@ impl GpsAccumulator {
         // If the buffer isn't yet long enough for the detected message type, we return None and wait for more data to accumulate.
         // If the first byte doesn't match any known message type, we discard it and continue looking for the next message.
 
-        while self.buffer.len() > 0 {
-            match self.buffer.get(0) {
+        while !self.buffer.is_empty() {
+            match self.buffer.first() {
                 Some(b) if *b == NMEA_START[0] => {
                     trace!("Found NMEA start byte");
 
@@ -101,7 +101,7 @@ impl GpsAccumulator {
                         }
                     };
 
-                    let message = frame.get_message();
+                    let message = Box::new(frame.get_message());
                     let message_raw = frame.frame_data().to_vec();
                     trace!("Parsed RTCM3 message: {:?}", message);
 
@@ -195,9 +195,9 @@ impl GpsAccumulator {
         }
     }
 
-    fn parse_nmea(nmea: &mut Nmea, buff: &[u8]) -> Option<(Nmea, SentenceType)> {
+    fn parse_nmea(nmea: &mut Nmea, buff: &[u8]) -> Option<(Box<Nmea>, SentenceType)> {
         // NMEA sentences are ASCII, so we can try to parse the buffer as UTF-8.
-        let s = match str::from_utf8(&buff) {
+        let s = match str::from_utf8(buff) {
             Ok(s) => s,
             Err(e) => {
                 debug!("Failed to parse GPS data as UTF-8: {}", e);
@@ -210,7 +210,7 @@ impl GpsAccumulator {
                 trace!("Parsed NMEA sentence: {:?}", sentence);
                 trace!("Current state: {:?}", nmea);
 
-                Some((nmea.clone(), sentence))
+                Some((Box::new(nmea.clone()), sentence))
             }
             Err(e) => {
                 debug!("Failed to parse NMEA sentence: {}", e);
@@ -230,7 +230,7 @@ mod test {
 
     #[test]
     fn test_nmea_parsing() {
-        setup_logging(LevelFilter::TRACE);
+        setup_logging(LevelFilter::TRACE, false);
 
         let mut a = GpsAccumulator::new();
 
@@ -249,7 +249,7 @@ mod test {
 
     #[test]
     fn test_rtcm3_parsing() {
-        setup_logging(LevelFilter::TRACE);
+        setup_logging(LevelFilter::TRACE, false);
 
         let message = &[
             0xd3, 0x02, 0x16, 0x46, 0x70, 0x00, 0x80, 0x96, 0x46, 0x20, 0x00, 0x20, 0x00, 0x00,

@@ -22,11 +22,11 @@ use parser::GpsAccumulator;
 /// A handle to a GPS device, providing a stream of updates* and a sink for sending
 /// data / control messages to the GPS device.
 ///
-/// * updates can be received as a [Stream] on [Gps] using [Gps::connect] or
+/// Updates can be received as a [Stream] on [Gps] using [Gps::connect] or
 /// sent to a previously created channel using [Gps::connect_with_channel].
 pub struct Gps<RX = UnboundedReceiver<GpsMessage>> {
     exit_tx: tokio::sync::broadcast::Sender<()>,
-    state: Arc<Mutex<Nmea>>,
+    state: Arc<Mutex<Box<Nmea>>>,
     update_rx: RX,
     write_tx: UnboundedSender<Vec<u8>>,
     _handle: tokio::task::JoinHandle<()>,
@@ -38,6 +38,8 @@ pub enum GpsError {
     IoError(#[from] std::io::Error),
     #[error("Serial port error: {0}")]
     SerialPortError(#[from] tokio_serial::Error),
+    #[error("Runtime error: {0}")]
+    Runtime(#[from] anyhow::Error),
 }
 
 /// Messages received from the GPS
@@ -45,9 +47,9 @@ pub enum GpsError {
 pub enum GpsMessage {
     /// NMEA object with the type of sentence that was parsed (e.g. GGA, RMC, etc.)
     // TODO: rework / write a new NMEA parser that uses an enum?
-    Nmea(Nmea, SentenceType),
+    Nmea(Box<Nmea>, SentenceType),
     /// Parsed RTCM3 messages along with the raw byte representation for RTK forwarding etc.
-    Rtcm3(rtcm_rs::Message, Vec<u8>),
+    Rtcm3(Box<rtcm_rs::Message>, Vec<u8>),
     /// Raw UBX messages (not yet parsed, just forwarded as bytes)
     Ubx(Vec<u8>),
 }
@@ -62,8 +64,8 @@ impl Gps<UnboundedReceiver<GpsMessage>> {
             Self::connect_internal(port, baud_rate, exit_tx.clone(), update_tx).await?;
 
         Ok(Gps {
-            exit_tx: exit_tx,
-            state: state,
+            exit_tx,
+            state,
             update_rx,
             write_tx,
             _handle,
@@ -86,8 +88,8 @@ impl Gps<()> {
             Self::connect_internal(port, baud_rate, exit_tx.clone(), update_tx).await?;
 
         Ok(Gps {
-            exit_tx: exit_tx,
-            state: state,
+            exit_tx,
+            state,
             update_rx: (),
             write_tx,
             _handle,
@@ -98,13 +100,13 @@ impl Gps<()> {
 impl<RX> Gps<RX> {
     /// Connect to a GPS device on the specified serial port and baud rate
     pub async fn connect_internal(
-        port: &Path,
+        serial_port: &Path,
         baud_rate: u32,
         exit_tx: BroadcastSender<()>,
         update_tx: UnboundedSender<GpsMessage>,
     ) -> Result<
         (
-            Arc<Mutex<Nmea>>,
+            Arc<Mutex<Box<Nmea>>>,
             UnboundedSender<Vec<u8>>,
             tokio::task::JoinHandle<()>,
         ),
@@ -112,93 +114,106 @@ impl<RX> Gps<RX> {
     > {
         debug!(
             "Connecting to GPS on port {} at {} baud",
-            port.display(),
+            serial_port.display(),
             baud_rate
         );
 
-        let mut port = tokio_serial::new(port.as_os_str().to_str().unwrap(), baud_rate)
+        let mut port = tokio_serial::new(serial_port.as_os_str().to_str().unwrap(), baud_rate)
             .open_native_async()
             .map_err(GpsError::SerialPortError)?;
 
         debug!("Connected to serial port");
 
-        let state = Arc::new(Mutex::new(Nmea::default()));
+        let state = Arc::new(Mutex::new(Box::new(Nmea::default())));
 
         let state_handle = state.clone();
         let mut exit_rx = exit_tx.subscribe();
         let (write_tx, mut write_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
 
-        let _handle = tokio::task::spawn(async move {
-            debug!("Spawning GPS read task");
+        let task_name = format!(
+            "gps-{}",
+            serial_port
+                .file_name()
+                .map(|s| s.to_string_lossy())
+                .unwrap_or_else(|| "unknown".into())
+        );
+        let task_builder = tokio::task::Builder::new().name(&task_name);
 
-            let mut accumulator = GpsAccumulator::new();
+        let _handle = task_builder
+            .spawn(async move {
+                debug!("Spawning GPS read task");
 
-            let mut buff: Vec<u8> = Vec::with_capacity(1024);
+                let mut accumulator = GpsAccumulator::new();
 
-            'gps: loop {
-                select! {
-                    // Read from the GPS serial port
-                    result = port.read_buf(&mut buff) => match result {
-                        Ok(n) if n == 0 => {
-                            debug!("GPS port closed");
-                            break;
-                        }
-                        Ok(n) => {
-                            trace!("Read {} bytes from GPS: {:02x?}", n, &buff[..n]);
+                let mut buff: Vec<u8> = Vec::with_capacity(1024);
 
-                            // Add to accumulator
-                            accumulator.push(&buff[..n]);
-
-                            // Look for complete NMEA, RTCM, or UBX messages
-                            while let Some(message) = accumulator.next_message() {
-                                // Update internal NMEA state if it's an NMEA message
-                                if let GpsMessage::Nmea(ref nmea, _) = message {
-                                    let mut state = state_handle.lock().unwrap();
-                                    *state = nmea.clone();
-                                }
-
-                                // Send the parsed message to the main task
-                                if let Err(e) = update_tx.send(message) {
-                                    error!("Failed to send GPS update: {}", e);
-                                    break 'gps;
-                                }
+                'gps: loop {
+                    select! {
+                        // Read from the GPS serial port
+                        result = port.read_buf(&mut buff) => match result {
+                            Ok(0) => {
+                                debug!("GPS port closed");
+                                break;
                             }
-
-                            buff.clear();
-                        }
-                        Err(e) => {
-                            debug!("Error reading from GPS: {}", e);
-                        }
-                    },
-                    // Write to the GPS serial port
-                    Some(mut data) = write_rx.recv() => {
-                        match port.write(&mut data).await {
                             Ok(n) => {
-                                // TODO: check n == data.len()
-                                trace!("Wrote {} bytes to GPS", n);
+                                trace!("Read {} bytes from GPS: {:02x?}", n, &buff[..n]);
+
+                                // Add to accumulator
+                                accumulator.push(&buff[..n]);
+
+                                // Look for complete NMEA, RTCM, or UBX messages
+                                while let Some(message) = accumulator.next_message() {
+                                    // Update internal NMEA state if it's an NMEA message
+                                    if let GpsMessage::Nmea(ref nmea, _) = message {
+                                        let mut state = state_handle.lock().unwrap();
+                                        *state = nmea.clone();
+                                    }
+
+                                    // Send the parsed message to the main task
+                                    if let Err(e) = update_tx.send(message) {
+                                        error!("Failed to send GPS update: {}", e);
+                                        break 'gps;
+                                    }
+                                }
+
+                                buff.clear();
                             }
                             Err(e) => {
-                                debug!("Error writing to GPS: {}", e);
+                                debug!("Error reading from GPS: {}", e);
                             }
+                        },
+                        // Write to the GPS serial port
+                        Some(data) = write_rx.recv() => {
+                            match port.write(&data).await {
+                                Ok(n) => {
+                                    // TODO: check n == data.len()
+                                    trace!("Wrote {} bytes to GPS", n);
+                                }
+                                Err(e) => {
+                                    debug!("Error writing to GPS: {}", e);
+                                }
+                            }
+                        },
+                        // Handle the exit signal
+                        _e = exit_rx.recv() => {
+                            debug!("Exiting GPS read task");
+                            break;
                         }
-                    },
-                    // Handle the exit signal
-                    _e = exit_rx.recv() => {
-                        debug!("Exiting GPS read task");
-                        break;
                     }
                 }
-            }
 
-            debug!("GPS read task exited");
-        });
+                debug!("GPS read task exited");
+            })
+            .map_err(|e| {
+                GpsError::Runtime(anyhow::anyhow!("Failed to spawn GPS read task: {}", e))
+            })?;
 
         Ok((state, write_tx, _handle))
     }
 
     /// Fetch current NMEA state
     pub async fn nmea(&self) -> Nmea {
-        self.state.lock().unwrap().clone()
+        self.state.lock().unwrap().as_ref().clone()
     }
 }
 

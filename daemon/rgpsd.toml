@@ -6,7 +6,7 @@
 ctl_sock = "/tmp/rgpsd.sock"
 
 # GPS configuration
-[gps]
+[[gps]]
 # Serial port for GPS device
 gps_port = "/dev/ttyACM0"
 # Baud rate for GPS device

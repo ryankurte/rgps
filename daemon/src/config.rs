@@ -5,10 +5,12 @@ use std::path::{Path, PathBuf};
 #[cfg(not(target_family = "unix"))]
 use std::net::SocketAddr;
 
-use clap::{Parser, ValueEnum};
+use clap::Parser;
 use serde::{Deserialize, Serialize};
 
 use ntrip_client::{NtripConfig, NtripCredentials};
+
+use rgps::{GpsKind, default_sock_path};
 
 /// GPS Daemon configuration options
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
@@ -45,31 +47,13 @@ pub struct General {
     /// Daemon control socket
     #[cfg(target_family = "unix")]
     #[clap(long, default_value = default_sock_path().into_os_string(), env = "RGPSD_CTL_SOCK")]
+    #[serde(default = "default_sock_path")]
     pub ctl_sock: PathBuf,
 
+    /// Daemon control socket (TCP for non-unix platforms)
     #[cfg(not(target_family = "unix"))]
-    #[clap(long, default_value = "127.0.0.1:8080", env = "RGPSD_CTL_SOCK")]
+    #[clap(long, default_value = "127.0.0.1:8666", env = "RGPSD_CTL_SOCK")]
     pub ctl_sock: SocketAddr,
-}
-
-/// Load the default socket path depending on whether were running as a user
-/// or a system daemon
-pub fn default_sock_path() -> PathBuf {
-    if let Some(home) = std::env::home_dir() {
-        home.join(".rgpsd.sock")
-    } else {
-        PathBuf::from("/tmp/rgpsd.sock")
-    }
-}
-
-/// Load the default config path depending on whether were running as a user
-/// or a system daemon
-pub fn default_config_path() -> PathBuf {
-    if let Some(home) = std::env::home_dir() {
-        home.join(".config/rgpsd.toml")
-    } else {
-        PathBuf::from("/etc/rgpsd/rgpsd.toml")
-    }
 }
 
 /// GPS device configuration
@@ -90,24 +74,8 @@ pub struct Gps {
 
     /// GPS device kind
     #[clap(long, default_value = "generic", env = "GPSD_GPS_KIND")]
+    #[serde(default)]
     pub gps_kind: GpsKind,
-}
-
-/// GPS device kind, used for vendor-specific parsing and configuration
-#[derive(Clone, PartialEq, Debug, ValueEnum, Serialize, Deserialize)]
-pub enum GpsKind {
-    /// Generic GPS device (default)
-    Generic,
-    /// Ublox GPS device
-    Ublox,
-    /// Quectel GPS device
-    Quectel,
-}
-
-impl Default for GpsKind {
-    fn default() -> Self {
-        GpsKind::Generic
-    }
 }
 
 #[derive(Clone, PartialEq, Debug, Parser, Serialize, Deserialize)]
