@@ -2,7 +2,8 @@
 
 A GPS daemon with dynamic NTRIP support (written in Rust).
 This is intended to provide a simpler alternative to [gpsd](https://gpsd.gitlab.io/gpsd/) and enable setups that -just work- with DGPS or RTK-GPS on embedded linux devices (particularly robots).
-This provides a `rgpsd` service which can be configured to talk to GPS', NTRIP servers, and other location-related things, and a `rgpsc` client that can be used to request or stream status messages from the daemon.
+
+This provides a `rgpsd` service which can be configured to talk to GPS', NTRIP servers, and other location-related things, and a `rgpsc` client that can be used to request or stream status messages from the daemon (and a rust client library that can be used from your own code).
 
 ## Status
 
@@ -45,5 +46,7 @@ See the [issues](https://github.com/ryankurte/rgps/issues) for more details.
 This will not:
 - Dynamically discover GPS devices or perform auto-baud detection. I'm pretty comfortable with knowing the number of GPS' on a platform and having them configured ahead-of-time.
 - Support device hot-plug* (*though we should have connection recovery in case of (dis|re)connection)
+- Allow clients to fundamentally change the operation of connected GPS'
+  - While triggering an RTK survey or swapping between DGPS and RTK modes should be supported over the control socket, most subscribers to GPS 
 
 

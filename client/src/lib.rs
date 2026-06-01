@@ -5,7 +5,8 @@ use clap::Parser;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, trace};
 
-use rgps_core::{GpsInfo, GpsState, SubscriptionFlags, req::Req, resp::Resp};
+// Re-export core types to simplify client use
+pub use rgps_core::{GpsInfo, GpsState, SubscriptionFlags, req::Req, resp::Resp};
 
 // For unix-based platforms we use a Unix domain socket for the control interface.
 #[cfg(target_family = "unix")]
@@ -33,7 +34,7 @@ pub struct RgpsClientConfig {
     /// Daemon control socket (TCP for non-unix platforms)
     #[cfg(not(target_family = "unix"))]
     #[clap(long, default_value = "127.0.0.1:8666", env = "RGPSD_CTL_SOCK")]
-    #[serde(default = "default_sock_path")]
+    #[serde(default = "default_sock_addr")]
     pub ctl_sock: SocketAddr,
 
     /// Timeout for client requests (default: 5 seconds)
