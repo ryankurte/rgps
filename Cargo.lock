@@ -1906,6 +1906,7 @@ dependencies = [
 [[package]]
 name = "ntrip-client"
 version = "0.2.0"
+source = "git+https://github.com/nav-solutions/ntrip-client?branch=remove-openssl-dep#44dc9e521965ff534b0497f5dcb11c64b1dd07ae"
 dependencies = [
  "base64 0.22.1",
  "clap",
