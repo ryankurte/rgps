@@ -1,27 +1,29 @@
 use std::{collections::HashMap, time::Duration};
 
-use futures::{Stream, stream::StreamExt};
 use clap::Parser;
+use futures::{Stream, stream::StreamExt};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, trace};
 
 // Re-export core types to simplify client use
 pub use rgps_core::{GpsInfo, GpsState, SubscriptionFlags, req::Req, resp::Resp};
 
+use tokio_connectors::codecs::Json;
+
 // For unix-based platforms we use a Unix domain socket for the control interface.
 #[cfg(target_family = "unix")]
-use tokio_connectors::{codecs::Json, unix::UnixClient};
-#[cfg(target_family = "unix")]
 use rgps_core::default_sock_path;
+#[cfg(target_family = "unix")]
+use tokio_connectors::unix::UnixClient;
 
 // For non-unix (aka Windows) we use a TCP socket for the control interface,
 // since windows unix domain socket support has got lost somewhere.
 #[cfg(not(target_family = "unix"))]
-use tokio_connectors::tcp::TcpClient;
+use rgps_core::default_sock_addr;
 #[cfg(not(target_family = "unix"))]
 use std::net::SocketAddr;
 #[cfg(not(target_family = "unix"))]
-use rgps_core::default_sock_addr;
+use tokio_connectors::tcp::TcpClient;
 
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize, Parser)]
 pub struct RgpsClientConfig {

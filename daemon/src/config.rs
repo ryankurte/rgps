@@ -1,6 +1,9 @@
 //! Configuration objects and parsing for RGPSD
 
-use std::{net::SocketAddr, path::{Path, PathBuf}};
+use std::{
+    net::SocketAddr,
+    path::{Path, PathBuf},
+};
 
 use clap::Parser;
 use serde::{Deserialize, Serialize};
@@ -10,8 +13,7 @@ use ntrip_client::{NtripConfig, NtripCredentials};
 use rgps_core::{GpsKind, default_sock_path};
 
 #[cfg(not(target_family = "unix"))]
-use rgps::default_sock_addr;
-
+use rgps_core::default_sock_addr;
 
 /// GPS Daemon configuration options
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]

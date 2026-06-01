@@ -31,7 +31,7 @@ use std::net::SocketAddr;
 #[cfg(not(target_family = "unix"))]
 use tokio_connectors::tcp::TcpServer;
 
-use rgps_core::{GpsState, GpsInfo, SubscriptionFlags, req::Req, resp::Resp};
+use rgps_core::{GpsInfo, GpsState, SubscriptionFlags, req::Req, resp::Resp};
 
 pub mod config;
 pub mod error;
