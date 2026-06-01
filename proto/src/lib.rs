@@ -21,8 +21,7 @@ pub struct GpsInfo {
 }
 
 /// GPS device kind, used for vendor-specific parsing and configuration
-#[derive(Clone, PartialEq, Debug, ValueEnum, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Clone, PartialEq, Debug, ValueEnum, Serialize, Deserialize, Default)]
 pub enum GpsKind {
     /// Generic GPS device (default)
     #[default]
@@ -32,7 +31,6 @@ pub enum GpsKind {
     /// Quectel GPS device
     Quectel,
 }
-
 
 /// The current state of a GPS device, including fix type, location, speed, and other relevant information
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]

@@ -1944,8 +1944,9 @@ dependencies = [
 
 [[package]]
 name = "ntrip-client"
-version = "0.1.1"
-source = "git+https://github.com/nav-solutions/ntrip-client?branch=chore%2Ftidy-interface#f23e6ba19be11afe27d7a2b0dfe7cd1ea2aee95a"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7ace8a02beb8a8858b5d38eea388466f6136ee025c0e1b3ec8e9547610d93ed6"
 dependencies = [
  "base64 0.22.1",
  "clap",
@@ -3376,9 +3377,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-connectors"
-version = "0.1.5"
+version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e9b79f818b151d9c87d1badf4ed38d10bbacd34d1682872cb4c5e134ad16d66b"
+checksum = "b2e0eee6520b166d0431123ac866f6f1db67882c20f427d0178f59de5cf3d9e2"
 dependencies = [
  "futures",
  "postcard",

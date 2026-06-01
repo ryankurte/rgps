@@ -86,31 +86,23 @@ impl NtripActor {
         // Setup the NTRIP context and spawn the actor task
         let mut ctx = NtripContext::new(config, ntrip_tx).await?;
 
-        let task_builder = tokio::task::Builder::new().name("ntrip");
-        let handle = task_builder
-            .spawn(async move {
-                loop {
-                    select! {
-                        // Handle incoming commands
-                        Some((msg, tx)) = cmd_rx.recv() => {
-                            let res = ctx.handle_cmd(msg).await;
-                            let _ = tx.send(res);
-                        },
-                        else => {
-                            debug!("NTRIP command channel closed, exiting NTRIP actor");
-                            return Ok(());
-                        },
-                    }
+        let _handle = tokio::task::spawn(async move {
+            loop {
+                select! {
+                    // Handle incoming commands
+                    Some((msg, tx)) = cmd_rx.recv() => {
+                        let res = ctx.handle_cmd(msg).await;
+                        let _ = tx.send(res);
+                    },
+                    else => {
+                        debug!("NTRIP command channel closed, exiting NTRIP actor");
+                        return Ok(());
+                    },
                 }
-            })
-            .map_err(|e| {
-                Error::Runtime(anyhow::anyhow!("Failed to spawn NTRIP actor task: {}", e))
-            })?;
+            }
+        });
 
-        Ok(Self {
-            cmd_tx,
-            _handle: handle,
-        })
+        Ok(Self { cmd_tx, _handle })
     }
 
     /// Send a command to the NTRIP actor and await the response
@@ -204,11 +196,7 @@ impl NtripContext {
         }
 
         // See if we can find a (new|closer) mount
-        let server_info = self
-            .client
-            .list_mounts()
-            .await
-            .map_err(Error::Ntrip)?;
+        let server_info = self.client.list_mounts().await.map_err(Error::Ntrip)?;
 
         let nearest = match server_info.find_nearest(&location) {
             Some((m, d)) if d < self.config.distance_threshold => {

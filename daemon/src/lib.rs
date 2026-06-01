@@ -105,23 +105,18 @@ impl Rgpsd {
         let gpsd_ctx = RgpsdCtx::new(opts, exit.clone()).await?;
 
         // Spawn a task to run the GPSD main loop
-        let task_builder = tokio::task::Builder::new().name("rgpsd");
-        let ctl_task_handle = task_builder
-            .spawn(async move {
-                match gpsd_ctx.run().await {
-                    Ok(_) => {
-                        debug!("GPSD main loop exited successfully");
-                        Ok(())
-                    }
-                    Err(e) => {
-                        error!("GPSD main loop exited with error: {}", e);
-                        Err(e)
-                    }
+        let ctl_task_handle = tokio::task::spawn(async move {
+            match gpsd_ctx.run().await {
+                Ok(_) => {
+                    debug!("GPSD main loop exited successfully");
+                    Ok(())
                 }
-            })
-            .map_err(|e| {
-                Error::Runtime(anyhow::anyhow!("Failed to spawn GPSD main task: {}", e))
-            })?;
+                Err(e) => {
+                    error!("GPSD main loop exited with error: {}", e);
+                    Err(e)
+                }
+            }
+        });
 
         Ok(Self {
             _ctl_task_handle: ctl_task_handle,
@@ -354,6 +349,7 @@ impl RgpsdCtx {
         }
 
         for i in removals {
+            debug!("Removing subscriber {} due to send failure", i);
             self.subscriptions.remove(&i);
         }
     }

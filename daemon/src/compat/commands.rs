@@ -155,9 +155,7 @@ impl GpsdCommand {
         }
 
         // The command name ends with either `;` or `=`, so look for the first occurrence of either.
-        let name_end_pos = s
-            .find([';', '='])
-            .ok_or(ParseCommandError::InvalidFormat)?;
+        let name_end_pos = s.find([';', '=']).ok_or(ParseCommandError::InvalidFormat)?;
 
         // Grab the command name and convert to uppercase
         let name = &s[1..name_end_pos]; // Skip the leading '?'
