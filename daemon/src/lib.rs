@@ -31,7 +31,7 @@ use std::net::SocketAddr;
 #[cfg(not(target_family = "unix"))]
 use tokio_connectors::tcp::TcpServer;
 
-use rgps::{GpsState, SubscriptionFlags, req::Req, resp::Resp};
+use rgps_core::{GpsState, GpsInfo, SubscriptionFlags, req::Req, resp::Resp};
 
 pub mod config;
 pub mod error;
@@ -92,7 +92,7 @@ type SubscriptionId = SocketAddr;
 
 struct GpsHandle {
     gps: Gps<()>,
-    info: rgps::GpsInfo,
+    info: GpsInfo,
     state: GpsState,
     satellites: Vec<Satellite>,
 }
@@ -144,7 +144,7 @@ impl RgpsdCtx {
 
             gpss.push(GpsHandle {
                 gps: gps_handle,
-                info: rgps::GpsInfo {
+                info: GpsInfo {
                     port: gps.gps_port.to_string_lossy().into_owned(),
                     baud: gps.gps_baud,
                     kind: gps.gps_kind.clone(),

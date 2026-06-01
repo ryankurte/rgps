@@ -1,16 +1,17 @@
 //! Configuration objects and parsing for RGPSD
 
-use std::path::{Path, PathBuf};
-
-#[cfg(not(target_family = "unix"))]
-use std::net::SocketAddr;
+use std::{net::SocketAddr, path::{Path, PathBuf}};
 
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 
 use ntrip_client::{NtripConfig, NtripCredentials};
 
-use rgps::{GpsKind, default_sock_path};
+use rgps_core::{GpsKind, default_sock_path};
+
+#[cfg(not(target_family = "unix"))]
+use rgps::default_sock_addr;
+
 
 /// GPS Daemon configuration options
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
@@ -42,6 +43,7 @@ impl GpsdConfig {
     }
 }
 
+/// General daemon configuration
 #[derive(Clone, PartialEq, Debug, Parser, Serialize, Deserialize)]
 pub struct General {
     /// Daemon control socket
@@ -53,7 +55,12 @@ pub struct General {
     /// Daemon control socket (TCP for non-unix platforms)
     #[cfg(not(target_family = "unix"))]
     #[clap(long, default_value = "127.0.0.1:8666", env = "RGPSD_CTL_SOCK")]
+    #[serde(default = "default_sock_addr")]
     pub ctl_sock: SocketAddr,
+
+    /// Bind address for the optional (read only) HTTP server
+    #[clap(long, default_value = "127.0.0.1:8667", env = "RGPSD_HTTP_ADDR")]
+    pub http_addr: Option<SocketAddr>,
 }
 
 /// GPS device configuration
@@ -78,6 +85,7 @@ pub struct Gps {
     pub gps_kind: GpsKind,
 }
 
+/// NTRIP server configuration
 #[derive(Clone, PartialEq, Debug, Parser, Serialize, Deserialize)]
 pub struct Ntrip {
     /// NTRIP host

@@ -1,9 +1,11 @@
 use clap::Parser;
 use futures::StreamExt;
-use rgpsc::{RgpsClient, RgpsClientConfig};
 use tokio::select;
 use tracing::{debug, level_filters::LevelFilter};
 use tracing_subscriber::{EnvFilter, fmt::Subscriber as FmtSubscriber};
+
+use rgps_client::{RgpsClient, RgpsClientConfig};
+use rgps_core::SubscriptionFlags;
 
 /// WASM Embedded Runtime CLI
 #[derive(Clone, PartialEq, Debug, Parser)]
@@ -28,7 +30,7 @@ enum Command {
     /// Fetch the current satellite information for connected GPS devices
     GetSatellites,
     /// Stream updates for specific message types
-    Stream { flags: Vec<rgps::SubscriptionFlags> },
+    Stream { flags: Vec<SubscriptionFlags> },
 }
 
 #[tokio::main]

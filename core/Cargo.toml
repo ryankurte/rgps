@@ -1,6 +1,6 @@
 [package]
-name = "rgps"
-description = "RGPS - Protocols, parsing and shared types for RGPS(D|C)"
+name = "rgps-core"
+description = "RGPS core - Protocols, parsing and shared types for RGPS(D|C)"
 version.workspace = true
 edition.workspace = true
 repository.workspace = true

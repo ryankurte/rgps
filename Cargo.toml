@@ -1,7 +1,7 @@
 
 [workspace]
 resolver = "3"
-members = [ "proto", "daemon", "client" ]
+members = [ "core", "daemon", "client" ]
 
 [workspace.package]
 version = "0.1.0"
@@ -14,12 +14,13 @@ anyhow = "1.0.102"
 serde = { version = "1.0.228", default-features = false, features = ["derive", "std"] }
 toml = { version = "0.9.12" }
 serde_json = "1.0.149"
-clap = { version = "4.6.1", features = ["derive", "string"] }
+clap = { version = "4.6.1", features = ["derive", "string", "env"] }
 strum = { version = "0.27.2", features = ["derive"] }
 tracing = { version = "0.1.44", features = ["log"] }
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt", "env-filter"] }
 enumset = { version = "1.1.13", features = ["serde", "alloc"] }
 
+axum = "0.7.0"
 futures = "0.3.32"
 geoutils = { version = "0.5.1", features = ["serde"] }
 isocountry = "0.3.2"
@@ -51,15 +52,15 @@ ntrip-client = "0.2.0"
 tokio-connectors = "0.1.6"
 gpsd_proto = "1.0.0"
 
-rgps = "0.1.0"
-rgpsd = "0.1.0"
-rgpsc = "0.1.0"
+rgps-core = "0.1.0"
+rgps-daemon = "0.1.0"
+rgps-client = "0.1.0"
 
 [patch.crates-io]
 # Patches allowing us to do local development
-rgps = { path = "./proto" }
-rgpsd = { path = "./daemon" }
-rgpsc = { path = "./client" }
+rgps-core = { path = "./core" }
+rgps-daemon = { path = "./daemon" }
+rgps-client = { path = "./client" }
 
 #ntrip-client = { path = "../ntrip-client" }
 #nmea = { path = "../nmea" }

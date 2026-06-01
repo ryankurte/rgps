@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use super::SubscriptionId;
 
-use rgps::SubscriptionFlags;
+use rgps_core::SubscriptionFlags;
 
 /// Subscription management
 #[derive(Debug, Default)]

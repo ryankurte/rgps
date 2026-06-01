@@ -1,27 +1,26 @@
 use std::{collections::HashMap, time::Duration};
 
 use futures::{Stream, stream::StreamExt};
-
 use clap::Parser;
-use rgps::{GpsInfo, GpsState};
-#[cfg(target_family = "unix")]
-use rgps::{req::Req, resp::Resp};
 use serde::{Deserialize, Serialize};
+use tracing::{debug, trace};
+
+use rgps_core::{GpsInfo, GpsState, SubscriptionFlags, req::Req, resp::Resp};
 
 // For unix-based platforms we use a Unix domain socket for the control interface.
 #[cfg(target_family = "unix")]
 use tokio_connectors::{codecs::Json, unix::UnixClient};
+#[cfg(target_family = "unix")]
+use rgps_core::default_sock_path;
 
 // For non-unix (aka Windows) we use a TCP socket for the control interface,
 // since windows unix domain socket support has got lost somewhere.
 #[cfg(not(target_family = "unix"))]
 use tokio_connectors::tcp::TcpClient;
-use tracing::{debug, trace};
-
 #[cfg(not(target_family = "unix"))]
 use std::net::SocketAddr;
-
-use rgps::default_sock_path;
+#[cfg(not(target_family = "unix"))]
+use rgps_core::default_sock_addr;
 
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize, Parser)]
 pub struct RgpsClientConfig {
@@ -34,6 +33,7 @@ pub struct RgpsClientConfig {
     /// Daemon control socket (TCP for non-unix platforms)
     #[cfg(not(target_family = "unix"))]
     #[clap(long, default_value = "127.0.0.1:8666", env = "RGPSD_CTL_SOCK")]
+    #[serde(default = "default_sock_path")]
     pub ctl_sock: SocketAddr,
 
     /// Timeout for client requests (default: 5 seconds)
@@ -41,6 +41,7 @@ pub struct RgpsClientConfig {
     pub timeout: Duration,
 }
 
+/// A client connected to the RGPS daemon
 pub struct RgpsClient {
     #[cfg(target_family = "unix")]
     client: UnixClient<Json, Req, Resp>,
@@ -48,6 +49,7 @@ pub struct RgpsClient {
     #[cfg(not(target_family = "unix"))]
     client: TcpClient<Json, Req, Resp>,
 
+    /// Timeout for client requests
     timeout: Duration,
 }
 
@@ -110,7 +112,7 @@ impl RgpsClient {
     }
 
     /// Subscribe to updates for specific message types
-    pub async fn subscribe(&mut self, flags: Vec<rgps::SubscriptionFlags>) -> anyhow::Result<()> {
+    pub async fn subscribe(&mut self, flags: Vec<SubscriptionFlags>) -> anyhow::Result<()> {
         self.send::<()>(Req::Subscribe(flags)).await
     }
 

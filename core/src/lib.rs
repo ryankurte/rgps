@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{net::SocketAddr, path::PathBuf};
 
 use clap::ValueEnum;
 use enumset::EnumSetType;
@@ -127,6 +127,11 @@ pub fn default_sock_path() -> PathBuf {
     } else {
         PathBuf::from("/tmp/rgpsd.sock")
     }
+}
+
+/// Load the default TCP socket address for non-unix platforms
+pub fn default_sock_addr() -> SocketAddr {
+    SocketAddr::from(([127, 0, 0, 1], 8666))
 }
 
 /// Load the default config path depending on whether were running as a user

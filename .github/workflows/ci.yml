@@ -120,15 +120,15 @@ jobs:
 
     - name: Package daemon (ubuntu targets)
       if: ${{ matrix.os == 'ubuntu-latest' }}
-      run: cargo deb --manifest-path daemon/Cargo.toml --target ${{ matrix.target }} --no-build
+      run: cargo deb --manifest-path daemon/Cargo.toml --target ${{ matrix.target }} --no-build && cp target/${{ matrix.target }}/release/deb/rgpsd_*.deb .
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v7
       with:
         name: rgpsd-${{ matrix.target }}
         path: |
-            rgpsd-*.deb
-            rgpsd-${{ matrix.target }}.tgz
+          rgpsd-*.deb
+          rgpsd-${{ matrix.target }}.tgz
 
     - name: Upload binary archive to release
       if: ${{ startsWith(github.ref, 'refs/tags/v') && matrix.os != 'ubuntu-latest' }}
@@ -147,6 +147,116 @@ jobs:
         repo_token: ${{ secrets.GITHUB_TOKEN }}
         file: rgpsd-*.deb
         asset_name: rgpsd-${{ matrix.target }}.deb
+        tag: ${{ github.ref }}
+        overwrite: true
+
+  build-cli:
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.os == 'windows-latest'}}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            use_cross: false
+          - target: armv7-unknown-linux-gnueabihf 
+            os: ubuntu-latest
+            use_cross: true
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            use_cross: true
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            use_cross: false
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            use_cross: false
+
+    steps:
+    - uses: actions/checkout@v2
+    - uses: FranzDiebold/github-env-vars-action@v1.2.1
+      
+    - name: Configure toolchain
+      uses: actions-rust-lang/setup-rust-toolchain@v1.16.1
+      with:
+        target:  ${{ matrix.target }}
+        override: true
+
+    - name: Install cross
+      if: ${{ matrix.use_cross }}
+      run: cargo install cross --git https://github.com/cross-rs/cross --rev f86fd03 --locked
+
+    - name: Install deps (linux, native)
+      if: ${{ matrix.os == 'ubuntu-latest' && !matrix.use_cross }}
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y pkg-config libudev-dev libssl-dev
+
+    - name: Install cargo deb
+      run: cargo install cargo-deb --locked
+
+    - name: Install cargo sbom
+      run: cargo install cargo-sbom --locked
+
+    - name: Fetch cargo deps
+      run: cargo fetch --locked
+
+    - name: Build client (cross)
+      if: ${{ matrix.use_cross }}
+      run: cross build --manifest-path client/Cargo.toml --target ${{ matrix.target }} --release --locked
+
+    - name: Build client (native)
+      if: ${{ !matrix.use_cross }}
+      run: cargo build --manifest-path client/Cargo.toml --target ${{ matrix.target }} --release --locked
+
+    - name: Copy out the binary
+      run: |
+        cp target/${{ matrix.target }}/release/rgpsc${{ matrix.os == 'windows-latest' && '.exe' || '' }} .
+    
+    - name: Archive the binary
+      run: tar -czvf rgpsc-${{ matrix.target }}.tgz rgpsc${{ matrix.os == 'windows-latest' && '.exe' || '' }} 
+
+    - name: Generate SBOM
+      run: cargo-sbom --output-format=cyclone_dx_json_1_4 > rgps.json
+
+    # TODO: enable this when the repo is public
+    #- name: Generate artifact attestation
+    #  uses: actions/attest@v4
+    #  with:
+    #    subject-path: rgpsc-${{ matrix.target }}${{ matrix.os == 'windows-latest' && '.exe' || '' }}
+    #    sbom-path: rgps.json
+
+    - name: Package client (ubuntu targets)
+      if: ${{ matrix.os == 'ubuntu-latest' }}
+      run: cargo deb --manifest-path client/Cargo.toml --target ${{ matrix.target }} --no-build && cp target/${{ matrix.target }}/release/deb/rgpsc_*.deb .
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v7
+      with:
+        name: rgpsc-${{ matrix.target }}
+        path: |
+          rgpsc-*.deb
+          rgpsc-${{ matrix.target }}.tgz
+
+    - name: Upload binary archive to release
+      if: ${{ startsWith(github.ref, 'refs/tags/v') && matrix.os != 'ubuntu-latest' }}
+      uses: svenstaro/upload-release-action@v2
+      with:
+        repo_token: ${{ secrets.GITHUB_TOKEN }}
+        file: rgpsc-${{ matrix.target }}.tgz
+        asset_name: rgpsc-${{ matrix.target }}.tgz
+        tag: ${{ github.ref }}
+        overwrite: true
+
+    - name: Upload .deb package to release
+      if: ${{ startsWith(github.ref, 'refs/tags/v') && matrix.os == 'ubuntu-latest' }}
+      uses: svenstaro/upload-release-action@v2
+      with:
+        repo_token: ${{ secrets.GITHUB_TOKEN }}
+        file: rgpsc-*.deb
+        asset_name: rgpsc-${{ matrix.target }}.deb
         tag: ${{ github.ref }}
         overwrite: true
 
