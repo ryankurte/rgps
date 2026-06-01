@@ -10,7 +10,10 @@ use serde::{Deserialize, Serialize};
 
 use ntrip_client::{NtripConfig, NtripCredentials};
 
-use rgps_core::{GpsKind, default_sock_path};
+use rgps_core::{GpsKind};
+
+#[cfg(target_family = "unix")]
+use rgps_core::default_sock_path;
 
 #[cfg(not(target_family = "unix"))]
 use rgps_core::default_sock_addr;
