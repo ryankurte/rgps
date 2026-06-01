@@ -120,7 +120,7 @@ jobs:
 
     - name: Package daemon (ubuntu targets)
       if: ${{ matrix.os == 'ubuntu-latest' }}
-      run: cargo deb --manifest-path daemon/Cargo.toml --target ${{ matrix.target }} --no-build && cp target/${{ matrix.target }}/release/deb/rgpsd_*.deb .
+      run: cargo deb --manifest-path daemon/Cargo.toml --target ${{ matrix.target }} --no-build && cp target/debian/rgpsd_*.deb .
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v7
@@ -230,7 +230,7 @@ jobs:
 
     - name: Package client (ubuntu targets)
       if: ${{ matrix.os == 'ubuntu-latest' }}
-      run: cargo deb --manifest-path client/Cargo.toml --target ${{ matrix.target }} --no-build && cp target/${{ matrix.target }}/release/deb/rgpsc_*.deb .
+      run: cargo deb --manifest-path client/Cargo.toml --target ${{ matrix.target }} --no-build && cp target/debian/rgpsc_*.deb .
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v7
