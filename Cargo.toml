@@ -48,7 +48,7 @@ gnss-rs = "2.6.0"
 gnss-protos = { version = "0.0.2", features = ["gps"] }
 ublox = { version = "0.6.0", default-features = false, features = ["std", "sfrbx-gps", "ubx_proto23"] }
 nmea = { version = "0.7.0", features = ["serde"] }
-ntrip-client = "0.2.0"
+ntrip-client = "0.2.1"
 tokio-connectors = "0.1.6"
 gpsd_proto = "1.0.0"
 
@@ -67,10 +67,9 @@ rgps-client = { path = "./client" }
 #gpsd_proto = { path = "../gpsd_proto" }
 
 # Patches to update dependencies with fixes/changes that haven't been released yet
-ntrip-client = { git = "https://github.com/nav-solutions/ntrip-client", branch = "remove-openssl-dep" }
-nmea = { git = "https://github.com/AeroRust/nmea", branch = "main" }
-gpsd_proto = { git = "https://github.com/ryankurte/gpsd_proto.git", branch = "fix/serde" }
-postcard = { git = "https://github.com/jamesmunns/postcard", branch = "main" }
+#ntrip-client = { git = "https://github.com/nav-solutions/ntrip-client", branch = "main" }
+#nmea = { git = "https://github.com/AeroRust/nmea", branch = "main" }
+#postcard = { git = "https://github.com/jamesmunns/postcard", branch = "main" }
 
 #tokio-connectors = { path = "../../tokio-connectors" }
 

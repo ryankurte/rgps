@@ -40,7 +40,6 @@ pub mod ntrip;
 
 mod subscriptions;
 use subscriptions::Subscriptions;
-mod compat;
 
 use crate::{
     config::GpsdConfig,
