@@ -20,5 +20,14 @@ deb-linux-armv7: daemon-linux-armv7
 
 debs: deb-linux-x64 deb-linux-aarch64 deb-linux-armv7
 
+build-image:
+	docker build -t ghcr.io/ryankurte/rgps/build .
+
+run-image:
+	docker run --rm -it -v $(shell pwd):/work --workdir=/work ghcr.io/ryankurte/rgps/build
+
+push-image:
+	docker push ghcr.io/ryankurte/rgps/build
+
 sbom:
 	cargo-sbom --output-format=cyclone_dx_json_1_4 > rgps.json
