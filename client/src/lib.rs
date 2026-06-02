@@ -12,8 +12,6 @@ use tokio_connectors::codecs::Json;
 
 // For unix-based platforms we use a Unix domain socket for the control interface.
 #[cfg(target_family = "unix")]
-use rgps_core::default_sock_path;
-#[cfg(target_family = "unix")]
 use tokio_connectors::unix::UnixClient;
 
 // For non-unix (aka Windows) we use a TCP socket for the control interface,
