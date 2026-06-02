@@ -15,10 +15,6 @@ assets = [
 ]
 maintainer-scripts = "scripts/"
 systemd-units = { enable = false, unit-name = "rgpsd" }
-depends = [
-    "libssl",
-    "libudev",
-]
 
 [dependencies]
 anyhow = { workspace = true }
