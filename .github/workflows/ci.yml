@@ -106,17 +106,17 @@ jobs:
       run: |
         cp target/${{ matrix.target }}/release/rgpsd${{ matrix.os == 'windows-latest' && '.exe' || '' }} .
     
-    - name: Archive the binary
-      run: tar -czvf rgpsd-${{ matrix.target }}.tgz rgpsd${{ matrix.os == 'windows-latest' && '.exe' || '' }} 
-
     - name: Generate SBOM
       run: cargo-sbom --output-format=cyclone_dx_json_1_4 > rgps.json
 
     - name: Generate artifact attestation
       uses: actions/attest@v4
       with:
-        subject-path: rgpsd-${{ matrix.target }}${{ matrix.os == 'windows-latest' && '.exe' || '' }}
+        subject-path: rgpsd${{ matrix.os == 'windows-latest' && '.exe' || '' }}
         sbom-path: rgps.json
+
+    - name: Archive the binary
+      run: tar -czvf rgpsd-${{ matrix.target }}.tgz rgpsd${{ matrix.os == 'windows-latest' && '.exe' || '' }}
 
     - name: Package daemon (ubuntu targets)
       if: ${{ matrix.os == 'ubuntu-latest' }}
@@ -215,9 +215,6 @@ jobs:
     - name: Copy out the binary
       run: |
         cp target/${{ matrix.target }}/release/rgpsc${{ matrix.os == 'windows-latest' && '.exe' || '' }} .
-    
-    - name: Archive the binary
-      run: tar -czvf rgpsc-${{ matrix.target }}.tgz rgpsc${{ matrix.os == 'windows-latest' && '.exe' || '' }} 
 
     - name: Generate SBOM
       run: cargo-sbom --output-format=cyclone_dx_json_1_4 > rgps.json
@@ -225,8 +222,11 @@ jobs:
     - name: Generate artifact attestation
       uses: actions/attest@v4
       with:
-        subject-path: rgpsc-${{ matrix.target }}${{ matrix.os == 'windows-latest' && '.exe' || '' }}
+        subject-path: rgpsc${{ matrix.os == 'windows-latest' && '.exe' || '' }}
         sbom-path: rgps.json
+
+    - name: Archive the binary
+      run: tar -czvf rgpsc-${{ matrix.target }}.tgz rgpsc${{ matrix.os == 'windows-latest' && '.exe' || '' }}
 
     - name: Package client (ubuntu targets)
       if: ${{ matrix.os == 'ubuntu-latest' }}
