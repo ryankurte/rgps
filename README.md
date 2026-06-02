@@ -28,7 +28,8 @@ TODO.
 - [x] D-GPS with dynamic NTRIP discovery and updates. If you have an NTRIP/SNIP provider set the daemon will automatically discover (and update) itself to use the best mount as you move through space.
 - [x] Multi-GPS support (connect as many or as few GPS' as you fancy).
 - [ ] RTK-GPS
-  - [ ] Survey In
+  - [ ] Fix base station
+  - [ ] Survey in base station
   - [ ] RTCM sending
   - [ ] RTCM receiving
 - [ ] GPS time synchronisation (probably Linux only)
@@ -41,12 +42,12 @@ TODO.
 
 See the [issues](https://github.com/ryankurte/rgps/issues) for more details.
 
-#### Anti-features
+#### Anti-features / Opinions
 
 This will not:
 - Dynamically discover GPS devices or perform auto-baud detection. I'm pretty comfortable with knowing the number of GPS' on a platform and having them configured ahead-of-time.
 - Support device hot-plug* (*though we should have connection recovery in case of (dis|re)connection)
 - Allow clients to fundamentally change the operation of connected GPS'
-  - While triggering an RTK survey or swapping between DGPS and RTK modes should be supported over the control socket, most subscribers to GPS 
+  - While triggering an RTK survey or swapping between DGPS and RTK modes should be supported over the control socket, _subscribers_ to GPS information shouldn't need to do this kinda thing.
 
 

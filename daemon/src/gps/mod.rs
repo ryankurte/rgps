@@ -170,6 +170,7 @@ impl<RX> Gps<RX> {
                         }
                         Err(e) => {
                             debug!("Error reading from GPS: {}", e);
+                            break;
                         }
                     },
                     // Write to the GPS serial port
