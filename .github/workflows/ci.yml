@@ -12,7 +12,7 @@ env:
 
 permissions:
   id-token: write
-  contents: read
+  contents: write
   attestations: write
 
 jobs:
@@ -264,8 +264,6 @@ jobs:
     name: Create release on tag
     runs-on: ubuntu-latest
     if: ${{ startsWith(github.ref, 'refs/tags/v') }}
-    permissions:
-      contents: write
     steps:
 
       - name: Create Release
