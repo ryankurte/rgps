@@ -112,12 +112,11 @@ jobs:
     - name: Generate SBOM
       run: cargo-sbom --output-format=cyclone_dx_json_1_4 > rgps.json
 
-    # TODO: enable this when the repo is public
-    #- name: Generate artifact attestation
-    #  uses: actions/attest@v4
-    #  with:
-    #    subject-path: rgpsd-${{ matrix.target }}${{ matrix.os == 'windows-latest' && '.exe' || '' }}
-    #    sbom-path: rgps.json
+    - name: Generate artifact attestation
+      uses: actions/attest@v4
+      with:
+        subject-path: rgpsd-${{ matrix.target }}${{ matrix.os == 'windows-latest' && '.exe' || '' }}
+        sbom-path: rgps.json
 
     - name: Package daemon (ubuntu targets)
       if: ${{ matrix.os == 'ubuntu-latest' }}
@@ -223,12 +222,11 @@ jobs:
     - name: Generate SBOM
       run: cargo-sbom --output-format=cyclone_dx_json_1_4 > rgps.json
 
-    # TODO: enable this when the repo is public
-    #- name: Generate artifact attestation
-    #  uses: actions/attest@v4
-    #  with:
-    #    subject-path: rgpsc-${{ matrix.target }}${{ matrix.os == 'windows-latest' && '.exe' || '' }}
-    #    sbom-path: rgps.json
+    - name: Generate artifact attestation
+      uses: actions/attest@v4
+      with:
+        subject-path: rgpsc-${{ matrix.target }}${{ matrix.os == 'windows-latest' && '.exe' || '' }}
+        sbom-path: rgps.json
 
     - name: Package client (ubuntu targets)
       if: ${{ matrix.os == 'ubuntu-latest' }}
