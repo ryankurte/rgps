@@ -269,6 +269,6 @@ jobs:
         uses: ncipollo/release-action@v1
         id: create_release
         with:
-          tag: ${{ github.ref }}
-          name: Release ${{ github.ref }}
+          tag: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
 
