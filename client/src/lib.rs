@@ -28,10 +28,13 @@ use tokio_connectors::tcp::TcpClient;
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize, Parser)]
 pub struct RgpsClientConfig {
     /// Daemon control socket
+    /// 
+    /// NOTE: the client will look for the rgps control sockets at known default locations,
+    /// so this option is only needed if you want to specify a custom socket path or address.
     #[cfg(target_family = "unix")]
-    #[clap(long, default_value = default_sock_path().into_os_string(), env = "RGPSD_CTL_SOCK")]
-    #[serde(default = "default_sock_path")]
-    pub ctl_sock: std::path::PathBuf,
+    #[clap(long, env = "RGPSD_CTL_SOCK")]
+    #[serde(default)]
+    pub ctl_sock: Option<std::path::PathBuf>,
 
     /// Daemon control socket (TCP for non-unix platforms)
     #[cfg(not(target_family = "unix"))]
@@ -61,16 +64,50 @@ pub struct RgpsClient {
 impl RgpsClient {
     /// Connect to the RGPS daemon using the provided configuration
     pub async fn connect(config: &RgpsClientConfig) -> anyhow::Result<Self> {
+
+        // Find the control socket
+        let ctl_sock = match config.ctl_sock.as_ref() {
+            Some(sock) => sock.clone(),
+            None => Self::find_ctl_sock()?,
+        };
+
         #[cfg(target_family = "unix")]
-        let client = UnixClient::<Json, Req, Resp>::connect(&config.ctl_sock).await?;
+        let client = UnixClient::<Json, Req, Resp>::connect(&ctl_sock).await?;
 
         #[cfg(not(target_family = "unix"))]
-        let client = TcpClient::<Json, Req, Resp>::connect(config.ctl_sock).await?;
+        let client = TcpClient::<Json, Req, Resp>::connect(&ctl_sock).await?;
 
         Ok(Self {
             client,
             timeout: config.timeout,
         })
+    }
+
+    #[cfg(target_family = "unix")]
+    fn find_ctl_sock() -> anyhow::Result<std::path::PathBuf> {
+        // Check whether we have a user-level socket available
+        if let Some(home_path) =  std::env::home_dir()
+            .map(|home| home.join(".rgpsd.sock")) && home_path.exists() {
+            return Ok(home_path)
+        }
+        
+        // Fall back to system-level socket
+        let system_path = std::path::PathBuf::from("/var/run/rgpsd.sock");
+        if system_path.exists() {
+            return Ok(system_path)
+        }
+
+        // TODO: we could go lookin' for config and extract the socket path from there?
+
+
+        Err(anyhow::anyhow!("No RGPS daemon control socket found"))
+    }
+
+    #[cfg(not(target_family = "unix"))]
+    fn find_ctl_sock() -> anyhow::Result<SocketAddr> {
+        // TODO: we could go lookin' for configs and extract the socket path from there?
+
+        Ok(default_sock_addr())
     }
 
     async fn send<RESP: TryFrom<Resp>>(&mut self, req: impl Into<Req>) -> anyhow::Result<RESP>

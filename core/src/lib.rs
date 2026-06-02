@@ -125,7 +125,7 @@ pub fn default_sock_path() -> PathBuf {
     if let Some(home) = std::env::home_dir() {
         home.join(".rgpsd.sock")
     } else {
-        PathBuf::from("/tmp/rgpsd.sock")
+        PathBuf::from("/var/run/rgpsd.sock")
     }
 }
 

@@ -8,9 +8,4 @@ mkdir -p /var/rgps/
 chown -R rgps:rgps /var/rgps
 chmod -R 770 /var/rgps
 
-# Create rgps socket directory
-mkdir -p /var/run/rgps
-chown -R rgps:rgps /var/run/rgps
-chmod -R 770 /var/run/rgps
-
 #DEBHELPER#
