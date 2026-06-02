@@ -2426,7 +2426,7 @@ dependencies = [
 
 [[package]]
 name = "rgps-client"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "anyhow",
  "clap",
@@ -2446,7 +2446,7 @@ dependencies = [
 
 [[package]]
 name = "rgps-core"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "anyhow",
  "clap",
@@ -2464,7 +2464,7 @@ dependencies = [
 
 [[package]]
 name = "rgps-daemon"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "anyhow",
  "axum 0.7.9",

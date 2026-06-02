@@ -4,7 +4,7 @@ resolver = "3"
 members = [ "core", "daemon", "client" ]
 
 [workspace.package]
-version = "0.2.5"
+version = "0.2.6"
 edition = "2024"
 repository = "https://github.com/ryankurte/rgpsd"
 license = "GPL-3.0-or-later"
