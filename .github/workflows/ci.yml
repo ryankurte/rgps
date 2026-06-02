@@ -184,6 +184,7 @@ jobs:
       with:
         target:  ${{ matrix.target }}
         override: true
+        cache-key: ${{ runner.os }}-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
 
     - name: Install cross
       if: ${{ matrix.use_cross }}
