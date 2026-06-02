@@ -3,7 +3,7 @@ Description=RGPS GPS Daemon
 After=network.target
 
 [Service]
-ExecStart=/usr/local/bin/gpsd
+ExecStart=/usr/local/bin/rgpsd --config /etc/rgpsd/rgpsd.toml
 Restart=on-failure
 RestartSec=5
 
