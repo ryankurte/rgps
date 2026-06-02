@@ -68,7 +68,7 @@ rgps-client = { path = "./client" }
 
 # Patches to update dependencies with fixes/changes that haven't been released yet
 #ntrip-client = { git = "https://github.com/nav-solutions/ntrip-client", branch = "main" }
-#nmea = { git = "https://github.com/AeroRust/nmea", branch = "main" }
+nmea = { git = "https://github.com/AeroRust/nmea", branch = "main" }
 #postcard = { git = "https://github.com/jamesmunns/postcard", branch = "main" }
 
 #tokio-connectors = { path = "../../tokio-connectors" }
