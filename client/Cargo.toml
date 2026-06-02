@@ -12,10 +12,6 @@ maintainer = "ryan kurte <ryan@kurte.nz>"
 assets = [
     ["target/release/rgpsc", "usr/local/bin/", "755"],
 ]
-depends = [
-    "libssl",
-    "libudev",
-]
 
 [dependencies]
 anyhow = { workspace = true }
