@@ -127,7 +127,7 @@ jobs:
       with:
         name: rgpsd-${{ matrix.target }}
         path: |
-          rgpsd-*.deb
+          rgpsd_*.deb
           rgpsd-${{ matrix.target }}.tgz
 
     - name: Upload binary archive to release
@@ -145,7 +145,7 @@ jobs:
       uses: svenstaro/upload-release-action@v2
       with:
         repo_token: ${{ secrets.GITHUB_TOKEN }}
-        file: rgpsd-*.deb
+        file: rgpsd_*.deb
         asset_name: rgpsd-${{ matrix.target }}.deb
         tag: ${{ github.ref }}
         overwrite: true
@@ -237,7 +237,7 @@ jobs:
       with:
         name: rgpsc-${{ matrix.target }}
         path: |
-          rgpsc-*.deb
+          rgpsc_*.deb
           rgpsc-${{ matrix.target }}.tgz
 
     - name: Upload binary archive to release
@@ -255,7 +255,7 @@ jobs:
       uses: svenstaro/upload-release-action@v2
       with:
         repo_token: ${{ secrets.GITHUB_TOKEN }}
-        file: rgpsc-*.deb
+        file: rgpsc_*.deb
         asset_name: rgpsc-${{ matrix.target }}.deb
         tag: ${{ github.ref }}
         overwrite: true
