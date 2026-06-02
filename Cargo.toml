@@ -4,7 +4,7 @@ resolver = "3"
 members = [ "core", "daemon", "client" ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 repository = "https://github.com/ryankurte/rgpsd"
 license = "GPL-3.0-or-later"
@@ -52,9 +52,9 @@ ntrip-client = "0.2.1"
 tokio-connectors = "0.1.6"
 gpsd_proto = "1.0.0"
 
-rgps-core = "0.1.0"
-rgps-daemon = "0.1.0"
-rgps-client = "0.1.0"
+rgps-core = "0.2.0"
+rgps-daemon = "0.2.0"
+rgps-client = "0.2.0"
 
 [patch.crates-io]
 # Patches allowing us to do local development
