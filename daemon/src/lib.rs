@@ -371,7 +371,7 @@ impl RgpsdCtx {
 
         // Update state
         if let Some(fix) = nmea.fix_type {
-            state.fix = fix;
+            state.fix = fix.into();
         }
         state.altitude = nmea.altitude.map(|s| s as f64);
         state.speed = nmea.speed_over_ground.map(|s| s as f64);

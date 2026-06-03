@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use ntrip_client::{NtripConfig, NtripCredentials};
 
-use rgps_core::{GpsKind};
+use rgps_core::{GpsKind, GpsMode};
 
 #[cfg(target_family = "unix")]
 use rgps_core::default_sock_path;
@@ -88,6 +88,11 @@ pub struct Gps {
     #[clap(long, default_value = "generic", env = "GPSD_GPS_KIND")]
     #[serde(default)]
     pub gps_kind: GpsKind,
+
+    /// GPS device mode (requires a kind so we know how to apply this)
+    #[clap(long, default_value = "default", env = "GPSD_GPS_MODE")]
+    #[serde(default)]
+    pub gps_mode: Option<GpsMode>,
 }
 
 /// NTRIP server configuration

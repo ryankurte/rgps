@@ -391,8 +391,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c673075a2e0e5f4a1dde27ce9dee1ea4558c7ffe648f576438a20ca1d2acc4b0"
 dependencies = [
  "iana-time-zone",
+ "js-sys",
  "num-traits",
  "serde",
+ "wasm-bindgen",
  "windows-link",
 ]
 
@@ -1526,6 +1528,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "itertools"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
+dependencies = [
+ "either",
+]
+
+[[package]]
 name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2154,7 +2165,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "27c6023962132f4b30eb4c172c91ce92d933da334c59c23cddee82358ddafb0b"
 dependencies = [
  "anyhow",
- "itertools",
+ "itertools 0.12.1",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -2449,13 +2460,17 @@ name = "rgps-core"
 version = "0.2.6"
 dependencies = [
  "anyhow",
+ "bytes",
+ "chrono",
  "clap",
  "enumset",
  "geoutils",
+ "itertools 0.14.0",
  "nmea",
  "serde",
  "serde_json",
  "strum",
+ "thiserror 1.0.69",
  "tokio",
  "toml",
  "tracing",
