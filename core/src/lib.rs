@@ -3,9 +3,9 @@ use std::{net::SocketAddr, path::PathBuf};
 use clap::ValueEnum;
 use enumset::EnumSetType;
 use geoutils::Location;
-use nmea::sentences::FixType;
 use serde::{Deserialize, Serialize};
 
+pub mod nmea;
 pub mod req;
 pub mod resp;
 
@@ -32,11 +32,20 @@ pub enum GpsKind {
     Quectel,
 }
 
+/// GPS device mode, controls the RTK behaviour of the GPS device
+#[derive(Clone, PartialEq, Debug, ValueEnum, Serialize, Deserialize)]
+pub enum GpsMode {
+    /// Rover mode, moving device, consumes RTCM3 corrections for DGPS/RTK positioning
+    Rover,
+    /// Static / base station mode, surveyed in or fixed location, produces RTCM3/RTK corrections
+    Station,
+}
+
 /// The current state of a GPS device, including fix type, location, speed, and other relevant information
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct GpsState {
     /// The current GPS fix type
-    pub fix: FixType,
+    pub fix: GpsFix,
     /// The number of satellites currently in view
     pub num_satellites: u32,
     /// The current location of the GPS device, if available
@@ -63,7 +72,7 @@ pub struct Dop {
 impl Default for GpsState {
     fn default() -> Self {
         GpsState {
-            fix: FixType::Invalid,
+            fix: GpsFix::Invalid,
             location: None,
             altitude: None,
             speed: None,
@@ -141,5 +150,43 @@ pub fn default_config_path() -> PathBuf {
         home.join(".config/rgpsd.toml")
     } else {
         PathBuf::from("/etc/rgpsd/rgpsd.toml")
+    }
+}
+
+/// GPS fix types
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+pub enum GpsFix {
+    Invalid,
+    /// Standard GPS fix
+    Gps,
+    /// Differential GPS
+    DGps,
+    /// Precise Position Service
+    Pps,
+    /// Real Time Kinematic
+    Rtk,
+    /// Float RTK
+    FloatRtk,
+    /// ??
+    Estimated,
+    /// ??
+    Manual,
+    /// ??
+    Simulation,
+}
+
+impl From<::nmea::sentences::FixType> for GpsFix {
+    fn from(x: ::nmea::sentences::FixType) -> Self {
+        match x {
+            ::nmea::sentences::FixType::Invalid => GpsFix::Invalid,
+            ::nmea::sentences::FixType::Gps => GpsFix::Gps,
+            ::nmea::sentences::FixType::DGps => GpsFix::DGps,
+            ::nmea::sentences::FixType::Pps => GpsFix::Pps,
+            ::nmea::sentences::FixType::Rtk => GpsFix::Rtk,
+            ::nmea::sentences::FixType::FloatRtk => GpsFix::FloatRtk,
+            ::nmea::sentences::FixType::Estimated => GpsFix::Estimated,
+            ::nmea::sentences::FixType::Manual => GpsFix::Manual,
+            ::nmea::sentences::FixType::Simulation => GpsFix::Simulation,
+        }
     }
 }

@@ -51,6 +51,8 @@ impl GpsAccumulator {
                         }
                     };
 
+                    trace!("NMEA: {}", String::from_utf8_lossy(&self.buffer[..pos]));
+
                     // Try to parse the NMEA sentence
                     let message = match Self::parse_nmea(&mut self.nmea_parser, &self.buffer[..pos])
                     {
